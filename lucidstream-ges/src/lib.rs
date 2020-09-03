@@ -10,6 +10,11 @@ use uuid::Uuid;
 use eventstore::es6::connection::Connection;
 use eventstore::es6::types::{EventData, ExpectedVersion};
 
+pub mod includes {
+    pub use eventstore;
+    pub use uuid;
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(thiserror::Error, Debug)]
@@ -22,6 +27,7 @@ pub enum Error {
     Serialization(#[from] serde_json::Error),
 }
 
+#[derive(Clone)]
 pub struct EventStore {
     inner: Connection,
     batch_count: u64,

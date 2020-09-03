@@ -1,0 +1,15 @@
+[package]
+name = "lucidstream-inmemory"
+version = "0.1.0"
+authors = ["Denis Tsai <denistsai@aetheras.io>"]
+edition = "2018"
+license = "MIT"
+repository = "https://github.com/dt665m/lucidstream-rs"
+description = "Lucidstream eventstore implementation for www.eventstore.com"
+
+[dependencies]
+lucidstream = { path = "../lucidstream" }
+async-trait = "0.1.40"
+thiserror = {version = "1.0" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

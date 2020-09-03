@@ -1,0 +1,15 @@
+[package]
+name = "lucidstream"
+version = "0.1.0"
+authors = ["Denis Tsai <denistsai@aetheras.io>"]
+edition = "2018"
+license = "MIT"
+repository = "https://github.com/dt665m/lucidstream-rs"
+description = "Event Sourcing Traits"
+
+[dependencies]
+async-trait = "0.1.40"
+thiserror = {version = "1.0" }
+futures = "0.3.5"
+serde = { version = "1.0", features = ["derive"] }
+

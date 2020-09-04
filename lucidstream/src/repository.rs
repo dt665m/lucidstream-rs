@@ -43,7 +43,6 @@ where
 {
     pub async fn handle(
         store: &E,
-        origin: &T::Id,
         id: T::Id,
         command: T::Command,
         retry_count: usize,
@@ -63,7 +62,7 @@ where
                     })?;
 
                 let changes = ar
-                    .handle(&origin, command.clone())
+                    .handle(command.clone())
                     .map_err(|e| Error::EntityCommand(e.to_string()))?
                     .take_changes();
 
@@ -83,7 +82,6 @@ where
 
     pub async fn handle_not_exists(
         store: &E,
-        origin: &T::Id,
         id: T::Id,
         command: T::Command,
     ) -> Result<AggregateRoot<T>, Error> {
@@ -91,7 +89,7 @@ where
         // will guarantee that this aggregate id does not exist / has no events
         let mut ar = AggregateRoot::<T>::new(id);
         let changes = ar
-            .handle(origin, command)
+            .handle(command)
             .map_err(|e| Error::EntityCommand(e.to_string()))?
             .take_changes();
 
@@ -111,7 +109,6 @@ where
     /// and maybe some extreme cases of optimization.  Use sparingly.
     pub async fn handle_exists(
         store: &E,
-        origin: &T::Id,
         id: T::Id,
         command: T::Command,
     ) -> Result<AggregateRoot<T>, Error> {
@@ -125,7 +122,7 @@ where
             })?;
 
         let changes = ar
-            .handle(origin, command)
+            .handle(command)
             .map_err(|e| Error::EntityCommand(e.to_string()))?
             .take_changes();
 
@@ -141,7 +138,6 @@ where
 
     pub async fn dry_run(
         store: &E,
-        origin: T::Id,
         id: T::Id,
         command: T::Command,
     ) -> Result<AggregateRoot<T>, Error> {
@@ -155,7 +151,7 @@ where
             })?;
 
         let mut ar = ar;
-        ar.handle(&origin, command)
+        ar.handle(command)
             .map_err(|e| Error::EntityCommand(e.to_string()))?;
         Ok(ar)
     }

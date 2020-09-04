@@ -50,8 +50,8 @@ impl<T: Aggregate> AggregateRoot<T> {
     // let ar = Aggregate....
     // ar.handle(${cmd}).take_changes() <--- this leaves the original ar variable intact
     // ```
-    pub fn handle(&mut self, origin: &T::Id, command: T::Command) -> Result<&mut Self, T::Error> {
-        let mut events = self.state.handle(&origin, command)?;
+    pub fn handle(&mut self, command: T::Command) -> Result<&mut Self, T::Error> {
+        let mut events = self.state.handle(command)?;
         self.changes.append(&mut events);
         Ok(self)
     }

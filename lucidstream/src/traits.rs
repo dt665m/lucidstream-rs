@@ -22,11 +22,7 @@ pub trait Aggregate: Default + Debug + Clone + Send + Sync {
     fn kind() -> &'static str;
 
     /// Aggregate Command Handler
-    fn handle(
-        &self,
-        origin: &Self::Id,
-        command: Self::Command,
-    ) -> Result<Vec<Self::Event>, Self::Error>;
+    fn handle(&self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error>;
 
     /// Aggregate Event Applying
     fn apply(self, event: &Self::Event) -> Self;

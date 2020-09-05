@@ -66,8 +66,11 @@ where
                     .map_err(|e| Error::EntityCommand(e.to_string()))?
                     .take_changes();
 
+                // eventstore event index starts at 0, but we use u64 for aggregate so we start at
+                // version 1, so the -1 is required to align with the store
+                let expected_version = ar.version() - 1;
                 store
-                    .commit::<T>(ar.id(), ar.version(), &changes)
+                    .commit::<T>(ar.id(), expected_version, &changes)
                     .await
                     .map_err(|e| Error::Commit(e.to_string(), e.retryable()))
                     .map(|_| {

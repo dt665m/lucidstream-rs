@@ -123,13 +123,15 @@ impl EventStoreT for EventStore {
                 println!("  count: {:?}", count);
             }
 
-            println!("batch complete, {:?}/{:?}", count, self.batch_count);
             if count == self.batch_count {
                 // we read a whole batch
-                position = position + self.batch_count + 1;
-                println!("moving on to next batch: {:?}, {:?}", count, position);
+                position = position + self.batch_count;
+                println!(
+                    "read {:?}, moving on to next batch at {:?}",
+                    count, position
+                );
             } else {
-                println!("breaking loop!");
+                println!("batch complete, {:?}/{:?}", count, self.batch_count);
                 // there isn't anymore to read
                 break;
             }

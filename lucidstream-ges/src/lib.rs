@@ -152,7 +152,9 @@ impl EventStoreT for EventStore {
         T::Id: Serialize,
         T::Event: Serialize,
     {
-        commit::<T>(self, id, events, ExpectedVersion::Exact(version)).await
+        // eventstore event index starts at 0.  We use u64 for aggregate starting at 1 for the
+        // first event, so the -1 is required to align with the store
+        commit::<T>(self, id, events, ExpectedVersion::Exact(version - 1)).await
     }
 
     /// commit `events` for `id` using "must exist" as optimistic concurrency

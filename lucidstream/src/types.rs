@@ -78,10 +78,6 @@ impl<T: Aggregate> AggregateRoot<T> {
         });
         self
     }
-
-    pub fn deconstruct(self) -> (T::Id, T, u64) {
-        (self.id, self.state, self.version)
-    }
 }
 
 /// Envelope structure for DTO's that may need the Id and Version of an aggregate.  Can be used to
@@ -98,16 +94,15 @@ impl<T, U> Envelope<T, U> {
     pub fn into_inner(self) -> U {
         self.data
     }
-
-    pub fn deconstruct(self) -> (T, U) {
-        (self.id, self.data)
-    }
 }
 
 /// From implementation for AggregateRoot for convenience
 impl<T: Aggregate> From<AggregateRoot<T>> for Envelope<T::Id, T> {
     fn from(item: AggregateRoot<T>) -> Envelope<T::Id, T> {
-        let (id, state, version) = item.deconstruct();
+        let AggregateRoot {
+            id, state, version, ..
+        } = item;
+
         Envelope {
             id,
             version,

@@ -188,11 +188,7 @@ mod test {
             "accountAggregate"
         }
 
-        fn handle(
-            &self,
-            origin: &Self::Id,
-            command: Self::Command,
-        ) -> Result<Vec<Self::Event>, Self::Error> {
+        fn handle(&self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error> {
             // validations
             match command {
                 Command::Create { owner, balance } => Ok(vec![

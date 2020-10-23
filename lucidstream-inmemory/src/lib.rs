@@ -67,7 +67,7 @@ impl EventStore for MemEventStore {
                 .lock()
                 .unwrap()
                 .entry(id.to_string())
-                .or_insert_with(|| vec![])
+                .or_insert_with(Vec::new)
                 .push(
                     serde_json::json!(Envelope {
                         id: id.clone(),

@@ -131,9 +131,9 @@ mod test {
 
     #[derive(Clone)]
     enum Command {
-        Create { owner: String, balance: u64 },
-        Debit { value: u64 },
-        Credit { value: u64 },
+        Create { owner: String, balance: i64 },
+        Debit { value: i64 },
+        Credit { value: i64 },
     }
 
     impl Display for Command {
@@ -153,8 +153,8 @@ mod test {
     #[derive(Debug, Eq, PartialEq, Clone, Serialize)]
     enum Event {
         Created { owner: String },
-        Credited { value: u64 },
-        Debited { value: u64 },
+        Credited { value: i64 },
+        Debited { value: i64 },
     }
 
     impl Display for Event {
@@ -175,7 +175,7 @@ mod test {
     struct Account {
         owner: String,
         suspended: bool,
-        balance: u64,
+        balance: i64,
     }
 
     impl Aggregate for Account {
@@ -197,10 +197,14 @@ mod test {
                 ]),
 
                 Command::Debit { value } => {
-                    if self.owner != *origin {
-                        Err(Error::Msg("you are not armor"))
+                    if let Some(val) = self.balance.checked_sub(value) {
+                        if val < 0 {
+                            Err(Error::Msg("insufficient funds"))
+                        } else {
+                            Ok(vec![Event::Debited { value }])
+                        }
                     } else {
-                        Ok(vec![Event::Debited { value }])
+                        Err(Error::Msg("invalid debit"))
                     }
                 }
 
@@ -244,11 +248,11 @@ mod test {
 
         assert_eq!(*ar.id(), "abcd1".to_owned());
         assert_eq!(ar.version(), ar_version);
-        assert_eq!(ar.state().owner, "armor".to_owned(),);
+        assert_eq!(ar.state().owner, "armor".to_owned());
         assert_eq!(ar.state().balance, 25);
         assert!(!ar.state().suspended);
 
-        ar.handle(&"armor".to_owned(), Command::Debit { value: 5 })
+        ar.handle(Command::Debit { value: 5 })
             .expect("command handler succeeds");
         let changes = ar.take_changes();
 

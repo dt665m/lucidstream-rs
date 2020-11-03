@@ -6,25 +6,25 @@ use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
 
 pub trait Aggregate: Default + Debug + Clone + Send + Sync {
-    /// Unique Identifier
+    /// unique identifier type
     type Id: Display + Clone + Send + Sync;
 
-    /// Command
+    /// command type
     type Command: Display + Clone + Send + Sync;
 
-    /// Event
+    /// event type
     type Event: Display + Clone + Send + Sync;
 
-    /// Error
+    /// error type
     type Error: std::error::Error + Send + 'static;
 
-    /// Aggregate Type
+    /// aggregate type description
     fn kind() -> &'static str;
 
-    /// Aggregate Command Handler
+    /// handle commands, generating events
     fn handle(&self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error>;
 
-    /// Aggregate Event Applying
+    /// apply events on aggretate
     fn apply(self, event: &Self::Event) -> Self;
 }
 

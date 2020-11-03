@@ -73,10 +73,42 @@ impl EventStore {
             .await
             .map_err(|e| Error::EventStore(e.to_string()))?;
 
-        println!("write result: {:?}", write_result);
+        log::debug!("write result: {:?}", write_result);
         write_result
             .map(|_| ())
             .map_err(|_| Error::WrongExpectedVersion)
+    }
+
+    pub async fn load_history<T: Aggregate, F>(&self, id: &T::Id) -> Result<Vec<T::Event>>
+    where
+        T::Event: DeserializeOwned,
+    {
+        let stream_id = [T::kind(), "_", &id.to_string()].concat();
+        let mut history = vec![];
+        let mut f = |e| {
+            history.push(e);
+        };
+        let mut position = 0;
+        loop {
+            let count =
+                load_events::<T, _>(&self.inner, &stream_id, &mut f, position, self.batch_count)
+                    .await?;
+
+            if count == self.batch_count {
+                // completed a whole batch, try more
+                position = position + self.batch_count;
+                log::debug!(
+                    "read {:?}, moving on to next batch at {:?}",
+                    count,
+                    position
+                );
+            } else {
+                // there isn't anymore to read
+                log::debug!("batch complete, {:?}/{:?}", count, self.batch_count);
+                break;
+            }
+        }
+        Ok(history)
     }
 }
 
@@ -89,56 +121,30 @@ impl EventStoreT for EventStore {
         T::Event: DeserializeOwned,
     {
         let stream_id = [T::kind(), "_", &id.to_string()].concat();
-        let mut history = vec![];
         let mut ar = AggregateRoot::new(id);
+        let mut f = |e| {
+            ar.apply(&e);
+        };
         let mut position = 0;
         loop {
-            println!("loading batch from {:?}", position);
-            let res = self
-                .inner
-                .read_stream(stream_id.to_owned())
-                .start_from(position)
-                .execute(self.batch_count)
-                .await
-                .map_err(|e| Error::EventStore(e.to_string()))?;
+            let count =
+                load_events::<T, _>(&self.inner, &stream_id, &mut f, position, self.batch_count)
+                    .await?;
 
-            let mut count = 0;
-            if let ReadResult::Ok(mut stream) = res {
-                while let Some(event) = stream
-                    .try_next()
-                    .await
-                    .map_err(|e| Error::EventStore(e.to_string()))?
-                {
-                    let event = event.get_original_event();
-                    let payload: T::Event = event.as_json()?;
-
-                    ar.apply(&payload);
-                    count += 1;
-
-                    history.push(payload);
-                    println!("event: {:?}", event.event_type);
-                    println!("  stream id: {:?}", event.stream_id);
-                    println!("  revision: {:?}", event.revision);
-                    println!("  position: {:?}", event.position);
-                    println!("  count: {:?}", count);
-                }
-
-                if count == self.batch_count {
-                    // we read a whole batch
-                    position = position + self.batch_count;
-                    println!(
-                        "read {:?}, moving on to next batch at {:?}",
-                        count, position
-                    );
-                } else {
-                    println!("batch complete, {:?}/{:?}", count, self.batch_count);
-                    // there isn't anymore to read
-                    break;
-                }
+            if count == self.batch_count {
+                // completed a whole batch, try more
+                position = position + self.batch_count;
+                log::debug!(
+                    "read {:?}, moving on to next batch at {:?}",
+                    count,
+                    position
+                );
+            } else {
+                // there isn't anymore to read
+                log::debug!("batch complete, {:?}/{:?}", count, self.batch_count);
+                break;
             }
         }
-
-        println!("history length: {:?}", history.len());
 
         Ok(ar)
     }
@@ -155,7 +161,7 @@ impl EventStoreT for EventStore {
     {
         // eventstore event index starts at 0.  We use u64 for aggregate starting at 1 for the
         // first event, so the -1 is required to align with the store
-        commit::<T>(self, id, events, ExpectedVersion::Exact(version - 1)).await
+        commit::<T>(&self.inner, id, events, ExpectedVersion::Exact(version - 1)).await
     }
 
     /// commit `events` for `id` using "must exist" as optimistic concurrency
@@ -164,7 +170,7 @@ impl EventStoreT for EventStore {
         T::Id: Serialize,
         T::Event: Serialize,
     {
-        commit::<T>(self, id, events, ExpectedVersion::StreamExists).await
+        commit::<T>(&self.inner, id, events, ExpectedVersion::StreamExists).await
     }
 
     /// commit `events` for `id` using "must not exist" as optimistic concurrency
@@ -173,7 +179,7 @@ impl EventStoreT for EventStore {
         T::Id: Serialize,
         T::Event: Serialize,
     {
-        commit::<T>(self, id, events, ExpectedVersion::NoStream).await
+        commit::<T>(&self.inner, id, events, ExpectedVersion::NoStream).await
     }
 
     async fn exists<T: Aggregate>(&self, id: T::Id) -> Result<bool> {
@@ -194,7 +200,7 @@ impl EventStoreT for EventStore {
 }
 
 async fn commit<T: Aggregate>(
-    eventstore: &EventStore,
+    conn: &EventStoreDBConnection,
     id: &T::Id,
     events: &[T::Event],
     expected_version: ExpectedVersion,
@@ -209,16 +215,57 @@ where
         .collect::<std::result::Result<Vec<EventData>, _>>()?;
 
     let stream_id = [T::kind(), "_", &id.to_string()].concat();
-    let write_result = eventstore
-        .inner
+    let write_result = conn
         .write_events(stream_id)
         .expected_version(expected_version)
         .send(stream::iter(event_datum))
         .await
         .map_err(|e| Error::EventStore(e.to_string()))?;
 
-    println!("write result: {:?}", write_result);
+    log::debug!("write result: {:?}", write_result);
     write_result
         .map(|_| ())
         .map_err(|_| Error::WrongExpectedVersion)
+}
+
+async fn load_events<T: Aggregate, F>(
+    conn: &EventStoreDBConnection,
+    stream_id: &str,
+    f: &mut F,
+    start_position: u64,
+    load_count: u64,
+) -> Result<u64>
+where
+    T::Event: DeserializeOwned,
+    F: FnMut(T::Event),
+{
+    log::debug!("loading events from {:?}", start_position);
+    let res = conn
+        .read_stream(stream_id.to_owned())
+        .start_from(start_position)
+        .execute(load_count)
+        .await
+        .map_err(|e| Error::EventStore(e.to_string()))?;
+
+    let mut count = 0;
+    if let ReadResult::Ok(mut stream) = res {
+        while let Some(event) = stream
+            .try_next()
+            .await
+            .map_err(|e| Error::EventStore(e.to_string()))?
+        {
+            let event = event.get_original_event();
+            let payload: T::Event = event.as_json()?;
+            count += 1;
+            f(payload);
+
+            log::debug!("event: {:?}", event.event_type);
+            log::debug!("  stream id: {:?}", event.stream_id);
+            log::debug!("  revision: {:?}", event.revision);
+            log::debug!("  position: {:?}", event.position);
+            log::debug!("  count: {:?}", count);
+        }
+    }
+
+    Ok(count)
 }

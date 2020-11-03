@@ -1,10 +1,6 @@
 use crate::traits::Aggregate;
 
-use serde::{
-    // ser::{Serialize, SerializeStruct, Serializer},
-    Deserialize,
-    Serialize,
-};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 pub struct AggregateRoot<T: Aggregate> {

@@ -7,8 +7,7 @@ use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use uuid::Uuid;
 
-use eventstore::es6::connection::Connection;
-use eventstore::es6::types::{EventData, ExpectedVersion};
+use eventstore::{EventData, EventStoreDBConnection, ExpectedVersion, ReadResult};
 
 pub mod includes {
     pub use eventstore;
@@ -29,7 +28,7 @@ pub enum Error {
 
 #[derive(Clone)]
 pub struct EventStore {
-    inner: Connection,
+    inner: EventStoreDBConnection,
     batch_count: u64,
 }
 
@@ -43,17 +42,17 @@ impl Retryable for Error {
 }
 
 impl EventStore {
-    pub fn new(inner: Connection, batch_count: u64) -> Self {
+    pub fn new(inner: EventStoreDBConnection, batch_count: u64) -> Self {
         Self { inner, batch_count }
     }
 
-    pub fn inner_ref(&self) -> &Connection {
+    pub fn inner_ref(&self) -> &EventStoreDBConnection {
         &self.inner
     }
 
     pub async fn commit_with_uuids<T: Aggregate>(
         &self,
-        stream_id: String,
+        id: &T::Id,
         version: u64,
         events: &[(T::Event, Uuid)],
     ) -> Result<()>
@@ -65,7 +64,7 @@ impl EventStore {
             .map(|(e, id)| EventData::json(e.to_string(), e).map(|e| e.id(*id)))
             .collect::<std::result::Result<Vec<EventData>, _>>()?;
 
-        // let stream_id = [T::kind(), "_", &id.to_string()].concat();
+        let stream_id = [T::kind(), "_", &id.to_string()].concat();
         let write_result = self
             .inner
             .write_events(stream_id)
@@ -95,7 +94,7 @@ impl EventStoreT for EventStore {
         let mut position = 0;
         loop {
             println!("loading batch from {:?}", position);
-            let mut history_stream = self
+            let res = self
                 .inner
                 .read_stream(stream_id.to_owned())
                 .start_from(position)
@@ -104,36 +103,38 @@ impl EventStoreT for EventStore {
                 .map_err(|e| Error::EventStore(e.to_string()))?;
 
             let mut count = 0;
-            while let Some(event) = history_stream
-                .try_next()
-                .await
-                .map_err(|e| Error::EventStore(e.to_string()))?
-            {
-                let event = event.get_original_event();
-                let payload: T::Event = event.as_json()?;
+            if let ReadResult::Ok(mut stream) = res {
+                while let Some(event) = stream
+                    .try_next()
+                    .await
+                    .map_err(|e| Error::EventStore(e.to_string()))?
+                {
+                    let event = event.get_original_event();
+                    let payload: T::Event = event.as_json()?;
 
-                ar.apply(&payload);
-                count += 1;
+                    ar.apply(&payload);
+                    count += 1;
 
-                history.push(payload);
-                println!("event: {:?}", event.event_type);
-                println!("  stream id: {:?}", event.stream_id);
-                println!("  revision: {:?}", event.revision);
-                println!("  position: {:?}", event.position);
-                println!("  count: {:?}", count);
-            }
+                    history.push(payload);
+                    println!("event: {:?}", event.event_type);
+                    println!("  stream id: {:?}", event.stream_id);
+                    println!("  revision: {:?}", event.revision);
+                    println!("  position: {:?}", event.position);
+                    println!("  count: {:?}", count);
+                }
 
-            if count == self.batch_count {
-                // we read a whole batch
-                position = position + self.batch_count;
-                println!(
-                    "read {:?}, moving on to next batch at {:?}",
-                    count, position
-                );
-            } else {
-                println!("batch complete, {:?}/{:?}", count, self.batch_count);
-                // there isn't anymore to read
-                break;
+                if count == self.batch_count {
+                    // we read a whole batch
+                    position = position + self.batch_count;
+                    println!(
+                        "read {:?}, moving on to next batch at {:?}",
+                        count, position
+                    );
+                } else {
+                    println!("batch complete, {:?}/{:?}", count, self.batch_count);
+                    // there isn't anymore to read
+                    break;
+                }
             }
         }
 
@@ -177,7 +178,7 @@ impl EventStoreT for EventStore {
 
     async fn exists<T: Aggregate>(&self, id: T::Id) -> Result<bool> {
         let stream_id = [T::kind(), "_", &id.to_string()].concat();
-        let mut stream = self
+        let res = self
             .inner
             .read_stream(stream_id)
             .start_from_beginning()
@@ -185,11 +186,10 @@ impl EventStoreT for EventStore {
             .await
             .map_err(|e| Error::EventStore(e.to_string()))?;
 
-        Ok(stream
-            .try_next()
-            .await
-            .map_err(|e| Error::EventStore(e.to_string()))?
-            .is_some())
+        match res {
+            ReadResult::Ok(_) => Ok(true),
+            _ => Ok(false),
+        }
     }
 }
 
@@ -203,12 +203,12 @@ where
     T::Id: Serialize,
     T::Event: Serialize,
 {
-    let stream_id = [T::kind(), "_", &id.to_string()].concat();
     let event_datum = events
         .iter()
         .map(|e| EventData::json(e.to_string(), e))
         .collect::<std::result::Result<Vec<EventData>, _>>()?;
 
+    let stream_id = [T::kind(), "_", &id.to_string()].concat();
     let write_result = eventstore
         .inner
         .write_events(stream_id)

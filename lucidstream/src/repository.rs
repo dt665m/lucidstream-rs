@@ -51,30 +51,7 @@ where
             let id = id.clone();
             let command = command.clone();
 
-            async move {
-                let mut ar = store
-                    .load::<T>(id)
-                    .await
-                    .map_err(|e| Error::Load(e.to_string()))
-                    .and_then(|ar| match ar.version() {
-                        0 => Err(Error::UnknownEntity),
-                        _ => Ok(ar),
-                    })?;
-
-                let changes = ar
-                    .handle(command.clone())
-                    .map_err(|e| Error::EntityCommand(e.to_string()))?
-                    .take_changes();
-
-                store
-                    .commit::<T>(ar.id(), ar.version(), &changes)
-                    .await
-                    .map_err(|e| Error::Commit(e.to_string(), e.retryable()))
-                    .map(|_| {
-                        ar.apply_iter(changes);
-                        ar
-                    })
-            }
+            Repository::handle_exists(store, id, command)
         };
 
         retry_future(factory, concurrency_retryable, retry_count).await

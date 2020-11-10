@@ -14,6 +14,7 @@ where
     loop {
         let result = f().await;
         if should_retry(&result) && attempts < count {
+            // probably should incur some kind of wait here to prevent thundering herd
             attempts += 1;
             continue;
         }

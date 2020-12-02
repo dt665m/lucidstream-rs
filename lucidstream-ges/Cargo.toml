@@ -10,11 +10,11 @@ description = "Lucidstream eventstore implementation for www.eventstore.com"
 [dependencies]
 lucidstream = { path = "../lucidstream" }
 
-log = { version = "0.4" }
+log = "0.4"
 uuid = { version = "0.8", features = ["serde", "v4", "v5"] }
-eventstore = { version = "0.9.5" }
-async-trait = { version = "0.1" }
-thiserror = { version = "1" }
-futures = { version = "0.3" }
+eventstore = "0.9.5"
+async-trait = "0.1"
+thiserror = "1"
+futures = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }

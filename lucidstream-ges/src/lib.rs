@@ -7,7 +7,7 @@ use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use uuid::Uuid;
 
-use eventstore::{EventData, EventStoreDBConnection, ExpectedVersion, ReadResult};
+use eventstore::{Client, EventData, ExpectedVersion, ReadResult};
 
 pub mod includes {
     pub use eventstore;
@@ -28,7 +28,7 @@ pub enum Error {
 
 #[derive(Clone)]
 pub struct EventStore {
-    inner: EventStoreDBConnection,
+    inner: Client,
     batch_count: u64,
 }
 
@@ -42,11 +42,11 @@ impl Retryable for Error {
 }
 
 impl EventStore {
-    pub fn new(inner: EventStoreDBConnection, batch_count: u64) -> Self {
+    pub fn new(inner: Client, batch_count: u64) -> Self {
         Self { inner, batch_count }
     }
 
-    pub fn inner_ref(&self) -> &EventStoreDBConnection {
+    pub fn inner_ref(&self) -> &Client {
         &self.inner
     }
 
@@ -88,6 +88,7 @@ impl EventStore {
         let mut f = |e| {
             history.push(e);
         };
+
         let mut position = 0;
         loop {
             let count =
@@ -200,7 +201,7 @@ impl EventStoreT for EventStore {
 }
 
 async fn commit<T: Aggregate>(
-    conn: &EventStoreDBConnection,
+    conn: &Client,
     id: &T::Id,
     events: &[T::Event],
     expected_version: ExpectedVersion,
@@ -229,7 +230,7 @@ where
 }
 
 async fn load_events<T: Aggregate, F>(
-    conn: &EventStoreDBConnection,
+    conn: &Client,
     stream_id: &str,
     f: &mut F,
     start_position: u64,

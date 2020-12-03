@@ -5,13 +5,11 @@ use lucidstream::types::AggregateRoot;
 use async_trait::async_trait;
 use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
-use uuid::Uuid;
 
 use eventstore::{Client, EventData, ExpectedVersion, ReadResult};
 
 pub mod includes {
     pub use eventstore;
-    pub use uuid;
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -50,26 +48,26 @@ impl EventStore {
         &self.inner
     }
 
-    pub async fn commit_with_uuids<T: Aggregate>(
+    pub async fn commit_with_eventdata<T: Aggregate>(
         &self,
         id: &T::Id,
         version: u64,
-        events: &[(T::Event, Uuid)],
+        events: Vec<EventData>,
     ) -> Result<()>
     where
         T::Event: Serialize,
     {
-        let event_datum = events
-            .iter()
-            .map(|(e, id)| EventData::json(e.to_string(), e).map(|e| e.id(*id)))
-            .collect::<std::result::Result<Vec<EventData>, _>>()?;
+        // let event_datum = events
+        //     .iter()
+        //     .map(|(e, id)| EventData::json(e.to_string(), e).map(|e| e.id(*id)))
+        //     .collect::<std::result::Result<Vec<EventData>, _>>()?;
 
         let stream_id = [T::kind(), "_", &id.to_string()].concat();
         let write_result = self
             .inner
             .write_events(stream_id)
             .expected_version(ExpectedVersion::Exact(version))
-            .send(stream::iter(event_datum))
+            .send(stream::iter(events))
             .await
             .map_err(|e| Error::EventStore(e.to_string()))?;
 

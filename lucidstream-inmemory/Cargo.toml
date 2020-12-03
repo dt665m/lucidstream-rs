@@ -1,6 +1,6 @@
 [package]
 name = "lucidstream-inmemory"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Denis Tsai <denistsai@aetheras.io>"]
 edition = "2018"
 license = "MIT"

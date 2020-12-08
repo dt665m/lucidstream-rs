@@ -51,7 +51,7 @@ impl EventStore {
     pub async fn commit_with_eventdata<T: Aggregate>(
         &self,
         id: &T::Id,
-        version: u64,
+        version: Option<u64>,
         events: Vec<EventData>,
     ) -> Result<()>
     where
@@ -61,11 +61,7 @@ impl EventStore {
         let write_result = self
             .inner
             .write_events(stream_id)
-            .expected_version(if version == 0 {
-                ExpectedVersion::NoStream
-            } else {
-                ExpectedVersion::Exact(version)
-            })
+            .expected_version(version.map_or(ExpectedVersion::NoStream, ExpectedVersion::Exact))
             .send(stream::iter(events))
             .await
             .map_err(|e| Error::EventStore(e.to_string()))?;

@@ -57,16 +57,15 @@ impl EventStore {
     where
         T::Event: Serialize,
     {
-        // let event_datum = events
-        //     .iter()
-        //     .map(|(e, id)| EventData::json(e.to_string(), e).map(|e| e.id(*id)))
-        //     .collect::<std::result::Result<Vec<EventData>, _>>()?;
-
         let stream_id = [T::kind(), "_", &id.to_string()].concat();
         let write_result = self
             .inner
             .write_events(stream_id)
-            .expected_version(ExpectedVersion::Exact(version))
+            .expected_version(if version == 0 {
+                ExpectedVersion::NoStream
+            } else {
+                ExpectedVersion::Exact(version)
+            })
             .send(stream::iter(events))
             .await
             .map_err(|e| Error::EventStore(e.to_string()))?;

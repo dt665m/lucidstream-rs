@@ -1,4 +1,9 @@
+use crate::traits::Aggregate;
 use futures::future::TryFuture;
+
+pub fn create_stream_id<T: Aggregate>(id: &str) -> String {
+    [T::kind(), "_", id].concat()
+}
 
 pub async fn retry_future<Fut, Factory, F, R>(
     f: Factory,

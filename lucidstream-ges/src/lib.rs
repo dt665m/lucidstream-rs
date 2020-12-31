@@ -48,16 +48,12 @@ impl EventStore {
         &self.inner
     }
 
-    pub async fn commit_with_eventdata<T: Aggregate>(
+    pub async fn manual_commit(
         &self,
-        id: &T::Id,
+        stream_id: String,
         version: Option<u64>,
         events: Vec<EventData>,
-    ) -> Result<()>
-    where
-        T::Event: Serialize,
-    {
-        let stream_id = [T::kind(), "_", &id.to_string()].concat();
+    ) -> Result<()> {
         let write_result = self
             .inner
             .write_events(stream_id)

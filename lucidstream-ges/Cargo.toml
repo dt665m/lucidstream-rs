@@ -11,7 +11,7 @@ description = "Lucidstream eventstore implementation for www.eventstore.com"
 lucidstream = { path = "../lucidstream" }
 
 log = "0.4"
-eventstore = "0.9.5"
+eventstore = "0.9.9"
 async-trait = "0.1"
 thiserror = "1"
 futures = "0.3"

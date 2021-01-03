@@ -11,6 +11,13 @@ deps: deps-rust
 deps-rust:
 	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
+tag:
+	git tag -a v${SEM_VER} -m "v${SEM_VER}"
+
+untag:
+	git tag -d v${SEM_VER}
+
+
 ###########################################################
 ### Integration Tests
 

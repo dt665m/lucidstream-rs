@@ -14,14 +14,19 @@ pub trait Retryable {
 pub enum Error {
     #[error("EventStore load error: `{0}`")]
     Load(String),
+
     #[error("EventStore commit error: `{0}`")]
     Commit(String, bool),
+
     #[error("Entity command error: `{0}`")]
     EntityCommand(String),
+
     #[error("Duplicate entity error")]
     DuplicateEntity,
+
     #[error("Unknown entity error")]
     UnknownEntity,
+
     #[error("Optimistic concurrency error")]
     Concurrency,
 }
@@ -111,7 +116,6 @@ impl<E> Repository<E> {
     where
         T: Aggregate,
         T::Event: Serialize + DeserializeOwned,
-        T::Error: std::error::Error + Send + 'static,
         E: EventStore<T::Event>,
         E::Error: Retryable,
     {
@@ -133,13 +137,13 @@ impl<E> Repository<E> {
 
         let changes = ar
             .handle(command)
-            .map_err(|e| Error::EntityCommand(e.to_string()))?
+            .map_err(|e: T::Error| Error::EntityCommand(e.to_string()))?
             .take_changes();
 
         self.0
             .commit_exists(&stream_id, &changes)
             .await
-            .map_err(|e| Error::Commit(e.to_string(), e.retryable()))
+            .map_err(|e: E::Error| Error::Commit(e.to_string(), e.retryable()))
             .map(|_| {
                 ar.apply_iter(changes);
                 ar
@@ -155,7 +159,6 @@ impl<E> Repository<E> {
     where
         T: Aggregate,
         T::Event: Serialize + DeserializeOwned,
-        T::Error: std::error::Error + Send + 'static,
         E: EventStore<T::Event>,
         E::Error: Retryable,
     {
@@ -175,7 +178,7 @@ impl<E> Repository<E> {
             })?;
 
         ar.handle(command)
-            .map_err(|e| Error::EntityCommand(e.to_string()))?;
+            .map_err(|e: T::Error| Error::EntityCommand(e.to_string()))?;
         Ok(ar)
     }
 }

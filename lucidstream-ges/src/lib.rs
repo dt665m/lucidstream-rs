@@ -19,8 +19,10 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub enum Error {
     #[error("EventStore error: `{0}`")]
     EventStore(String),
+
     #[error("Wrong expected version")]
     WrongExpectedVersion,
+
     #[error("Serialization error: `{0}`")]
     Serialization(#[from] serde_json::Error),
 }

@@ -49,7 +49,7 @@ where
     // let ar = Aggregate....
     // ar.handle(${cmd}).take_changes() <--- this leaves the original ar variable intact
     // ```
-    pub fn handle(&mut self, command: T::Command) -> Result<&mut Self, Box<dyn std::error::Error>> {
+    pub fn handle(&mut self, command: T::Command) -> Result<&mut Self, T::Error> {
         let mut events = self.state.handle(command)?;
         self.changes.append(&mut events);
         Ok(self)

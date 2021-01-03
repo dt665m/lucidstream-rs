@@ -12,7 +12,10 @@ pub struct AggregateRoot<T: Aggregate> {
     changes: Vec<T::Event>,
 }
 
-impl<T: Aggregate> AggregateRoot<T> {
+impl<T: Aggregate> AggregateRoot<T>
+where
+    T::Error: std::error::Error,
+{
     pub fn new(id: T::Id) -> Self {
         AggregateRoot::<T>::new_with_state(id, T::default(), 0)
     }
@@ -46,7 +49,7 @@ impl<T: Aggregate> AggregateRoot<T> {
     // let ar = Aggregate....
     // ar.handle(${cmd}).take_changes() <--- this leaves the original ar variable intact
     // ```
-    pub fn handle(&mut self, command: T::Command) -> Result<&mut Self, T::Error> {
+    pub fn handle(&mut self, command: T::Command) -> Result<&mut Self, Box<dyn std::error::Error>> {
         let mut events = self.state.handle(command)?;
         self.changes.append(&mut events);
         Ok(self)
@@ -113,7 +116,7 @@ mod test {
     use std::fmt::{self, Display};
 
     #[derive(Debug)]
-    enum Error {
+    pub enum Error {
         Msg(&'static str),
     }
 
@@ -126,7 +129,7 @@ mod test {
     impl std::error::Error for Error {}
 
     #[derive(Clone)]
-    enum Command {
+    pub enum Command {
         Create { owner: String, balance: i64 },
         Debit { value: i64 },
         Credit { value: i64 },
@@ -147,7 +150,7 @@ mod test {
     }
 
     #[derive(Debug, Eq, PartialEq, Clone, Serialize)]
-    enum Event {
+    pub enum Event {
         Created { owner: String },
         Credited { value: i64 },
         Debited { value: i64 },
@@ -168,10 +171,10 @@ mod test {
     }
 
     #[derive(Default, Clone, Debug)]
-    struct Account {
-        owner: String,
-        suspended: bool,
-        balance: i64,
+    pub struct Account {
+        pub owner: String,
+        pub suspended: bool,
+        pub balance: i64,
     }
 
     impl Aggregate for Account {

@@ -1,14 +1,15 @@
-use lucidstream::traits::{Aggregate, EventStore};
-use lucidstream::types::{AggregateRoot, Envelope};
+use lucidstream::traits::EventStore as EventStoreT;
+use lucidstream::types::Envelope;
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
 
 #[derive(thiserror::Error, Debug)]
-pub enum MemEventStoreError {
+pub enum Error {
     #[error("error: `{0}`")]
     EventStore(&'static str),
 }
@@ -28,49 +29,66 @@ impl Default for MemEventStore {
 }
 
 #[async_trait]
-impl EventStore for MemEventStore {
-    type Error = MemEventStoreError;
+impl<E> EventStoreT<E> for MemEventStore
+where
+    E: Serialize + DeserializeOwned + Display + Send + Sync + 'static,
+{
+    type Error = Error;
 
-    async fn load<T: Aggregate>(&self, id: T::Id) -> Result<AggregateRoot<T>, Self::Error>
+    async fn load_to<S, F>(&self, id: S, f: &mut F) -> Result<u64, Self::Error>
     where
-        T::Id: DeserializeOwned,
-        T::Event: DeserializeOwned,
+        F: FnMut(E) + Send + Sync,
+        S: AsRef<str> + Send + Sync,
     {
-        let mut ar = AggregateRoot::<T>::new(id);
-        if let Some(entries) = self.0.lock().unwrap().get(&ar.id().to_string()) {
+        if let Some(entries) = self.0.lock().unwrap().get(id.as_ref()) {
             let history = entries
                 .iter()
                 .map(|e| serde_json::from_str(e))
-                .collect::<Result<Vec<Envelope<T::Id, T::Event>>, _>>()
-                .expect("success")
-                .into_iter()
-                .map(|e| e.into_inner())
-                .collect::<Vec<T::Event>>();
-
-            ar.apply_iter(history);
+                .collect::<Result<Vec<Envelope<String, E>>, _>>()
+                .unwrap();
+            let len = history.len();
+            history.into_iter().for_each(|e| {
+                let inner = e.into_inner();
+                f(inner);
+            });
+            Ok(len as u64)
+        } else {
+            Ok(0)
         }
-        Ok(ar)
     }
 
-    async fn commit<T: Aggregate>(
-        &self,
-        id: &T::Id,
-        version: u64,
-        events: &[T::Event],
-    ) -> Result<(), Self::Error>
+    async fn load_history<S>(&self, id: S) -> Result<Vec<E>, Self::Error>
     where
-        T::Id: Serialize,
-        T::Event: Serialize,
+        S: AsRef<str> + Send + Sync,
+    {
+        if let Some(entries) = self.0.lock().unwrap().get(id.as_ref()) {
+            let history = entries
+                .iter()
+                .map(|e| serde_json::from_str(e))
+                .collect::<Result<Vec<Envelope<String, E>>, _>>()
+                .unwrap()
+                .into_iter()
+                .map(|e| e.into_inner())
+                .collect::<Vec<E>>();
+            Ok(history)
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    async fn commit<S>(&self, id: S, version: u64, events: &[E]) -> Result<(), Self::Error>
+    where
+        S: AsRef<str> + Send + Sync,
     {
         for e in events {
             self.0
                 .lock()
                 .unwrap()
-                .entry(id.to_string())
+                .entry(id.as_ref().to_owned())
                 .or_insert_with(Vec::new)
                 .push(
                     serde_json::json!(Envelope {
-                        id: id.clone(),
+                        id: id.as_ref(),
                         version,
                         data: e
                     })
@@ -80,23 +98,26 @@ impl EventStore for MemEventStore {
         Ok(())
     }
 
-    async fn commit_exists<T: Aggregate>(
-        &self,
-        _id: &T::Id,
-        _events: &[T::Event],
-    ) -> Result<(), Self::Error> {
+    /// commit `events` for `id` using "must exist" as optimistic concurrency
+    async fn commit_exists<S>(&self, _id: S, _events: &[E]) -> Result<(), Self::Error>
+    where
+        S: AsRef<str> + Send + Sync,
+    {
         unimplemented!();
     }
 
-    async fn commit_not_exists<T: Aggregate>(
-        &self,
-        _id: &T::Id,
-        _events: &[T::Event],
-    ) -> Result<(), Self::Error> {
+    /// commit `events` for `id` using "must not exist" as optimistic concurrency
+    async fn commit_not_exists<S>(&self, _id: S, _events: &[E]) -> Result<(), Self::Error>
+    where
+        S: AsRef<str> + Send + Sync,
+    {
         unimplemented!();
     }
 
-    async fn exists<T: Aggregate>(&self, id: T::Id) -> Result<bool, Self::Error> {
-        Ok(self.0.lock().unwrap().contains_key(&id.to_string()))
+    async fn exists<S>(&self, id: S) -> Result<bool, Self::Error>
+    where
+        S: AsRef<str> + Send + Sync,
+    {
+        Ok(self.0.lock().unwrap().contains_key(id.as_ref()))
     }
 }

@@ -33,45 +33,64 @@ pub fn concurrency_retryable<T>(result: &Result<T, Error>) -> bool {
     }
 }
 
-pub struct Repository<T, E>(std::marker::PhantomData<(T, E)>);
+#[derive(Clone)]
+pub struct Repository<E>(E);
 
-impl<T: Aggregate, E: EventStore> Repository<T, E>
-where
-    T::Id: Serialize + DeserializeOwned,
-    T::Event: Serialize + DeserializeOwned,
-    E::Error: Retryable,
-{
-    pub async fn handle(
-        store: &E,
+impl<E> Repository<E> {
+    pub fn new(eventstore: E) -> Self {
+        Self(eventstore)
+    }
+
+    pub fn inner_ref(&self) -> &E {
+        &self.0
+    }
+
+    pub async fn handle<T>(
+        &self,
         id: T::Id,
         command: T::Command,
         retry_count: usize,
-    ) -> Result<AggregateRoot<T>, Error> {
+    ) -> Result<AggregateRoot<T>, Error>
+    where
+        T: Aggregate,
+        T::Event: Serialize + DeserializeOwned,
+        T::Error: std::error::Error + Send + 'static,
+        E: EventStore<T::Event>,
+        E::Error: Retryable,
+    {
         let factory = || {
             let id = id.clone();
             let command = command.clone();
 
-            Repository::handle_exists(store, id, command)
+            self.handle_exists(id, command)
         };
 
         retry_future(factory, concurrency_retryable, retry_count).await
     }
 
-    pub async fn handle_not_exists(
-        store: &E,
+    pub async fn handle_not_exists<T>(
+        &self,
         id: T::Id,
         command: T::Command,
-    ) -> Result<AggregateRoot<T>, Error> {
+    ) -> Result<AggregateRoot<T>, Error>
+    where
+        T: Aggregate,
+        T::Event: Serialize + DeserializeOwned,
+        T::Error: std::error::Error + Send + 'static,
+        E: EventStore<T::Event>,
+        E::Error: Retryable,
+    {
         // we don't need incur a load from the event store because the commit
         // will guarantee that this aggregate id does not exist / has no events
+        let stream_id = [T::kind(), "_", &id.to_string()].concat();
         let mut ar = AggregateRoot::<T>::new(id);
         let changes = ar
             .handle(command)
             .map_err(|e| Error::EntityCommand(e.to_string()))?
             .take_changes();
 
-        store
-            .commit_not_exists::<T>(ar.id(), &changes)
+        self.0
+            .commit_not_exists(&stream_id, &changes)
             .await
             .map_err(|e| Error::Commit(e.to_string(), e.retryable()))
             .map(|_| {
@@ -84,18 +103,32 @@ where
     /// carefully.  This is only safe when the command generates an event that does not alter the
     /// state of the aggregate and order isn't important.  This function is here for completeness
     /// and maybe some extreme cases of optimization.  Use sparingly.
-    pub async fn handle_exists(
-        store: &E,
+    pub async fn handle_exists<T>(
+        &self,
         id: T::Id,
         command: T::Command,
-    ) -> Result<AggregateRoot<T>, Error> {
-        let mut ar = store
-            .load::<T>(id)
+    ) -> Result<AggregateRoot<T>, Error>
+    where
+        T: Aggregate,
+        T::Event: Serialize + DeserializeOwned,
+        T::Error: std::error::Error + Send + 'static,
+        E: EventStore<T::Event>,
+        E::Error: Retryable,
+    {
+        let stream_id = [T::kind(), "_", &id.to_string()].concat();
+        let mut ar = AggregateRoot::new(id.clone());
+        let mut f = |e| {
+            ar.apply(&e);
+        };
+
+        let _count = self
+            .0
+            .load_to(&stream_id, &mut f)
             .await
             .map_err(|e| Error::Load(e.to_string()))
-            .and_then(|ar| match ar.version() {
+            .and_then(|count| match count {
                 0 => Err(Error::UnknownEntity),
-                _ => Ok(ar),
+                _ => Ok(count),
             })?;
 
         let changes = ar
@@ -103,8 +136,8 @@ where
             .map_err(|e| Error::EntityCommand(e.to_string()))?
             .take_changes();
 
-        store
-            .commit_exists::<T>(ar.id(), &changes)
+        self.0
+            .commit_exists(&stream_id, &changes)
             .await
             .map_err(|e| Error::Commit(e.to_string(), e.retryable()))
             .map(|_| {
@@ -113,21 +146,34 @@ where
             })
     }
 
-    pub async fn dry_run(
-        store: &E,
+    pub async fn dry_run<S: AsRef<str> + Send + Sync, T>(
+        &self,
+        stream_id: S,
         id: T::Id,
         command: T::Command,
-    ) -> Result<AggregateRoot<T>, Error> {
-        let ar = store
-            .load::<T>(id)
+    ) -> Result<AggregateRoot<T>, Error>
+    where
+        T: Aggregate,
+        T::Event: Serialize + DeserializeOwned,
+        T::Error: std::error::Error + Send + 'static,
+        E: EventStore<T::Event>,
+        E::Error: Retryable,
+    {
+        let mut ar = AggregateRoot::new(id.clone());
+        let mut f = |e| {
+            ar.apply(&e);
+        };
+
+        let _count = self
+            .0
+            .load_to(stream_id, &mut f)
             .await
             .map_err(|e| Error::Load(e.to_string()))
-            .and_then(|ar| match ar.version() {
+            .and_then(|count| match count {
                 0 => Err(Error::UnknownEntity),
-                _ => Ok(ar),
+                _ => Ok(count),
             })?;
 
-        let mut ar = ar;
         ar.handle(command)
             .map_err(|e| Error::EntityCommand(e.to_string()))?;
         Ok(ar)

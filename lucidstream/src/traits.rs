@@ -1,5 +1,3 @@
-use crate::types::AggregateRoot;
-
 use std::fmt::{Debug, Display};
 
 use async_trait::async_trait;
@@ -29,46 +27,47 @@ pub trait Aggregate: Default + Debug + Clone + Send + Sync {
 }
 
 #[async_trait]
-pub trait EventStore {
+pub trait EventStore<E>
+where
+    E: Serialize + DeserializeOwned + Display + Send + Sync,
+{
     type Error: std::error::Error + 'static;
 
-    /// load events for Aggregate based on `id`.  Returns an event-hydrated Aggregate
-    async fn load<T: Aggregate>(&self, id: T::Id) -> Result<AggregateRoot<T>, Self::Error>
+    /// load events based on `kind` and `id` and applys it into `f` callback.  Returns the total
+    /// count loaded  
+    async fn load_to<S, F>(&self, id: S, f: &mut F) -> Result<u64, Self::Error>
     where
-        T::Id: DeserializeOwned,
-        T::Event: DeserializeOwned;
+        E: 'async_trait,
+        F: FnMut(E) + Send + Sync,
+        S: AsRef<str> + Send + Sync;
 
-    /// commit `events` for `id` using `version` as optimistic concurrency
-    async fn commit<T: Aggregate>(
-        &self,
-        id: &T::Id,
-        version: u64,
-        events: &[T::Event],
-    ) -> Result<(), Self::Error>
+    /// load events based on `kind` and `id`.  Returns Vector of Events loaded
+    async fn load_history<S: AsRef<str>>(&self, id: S) -> Result<Vec<E>, Self::Error>
     where
-        T::Id: Serialize,
-        T::Event: Serialize;
+        E: 'async_trait,
+        S: AsRef<str> + Send + Sync;
 
-    /// commit `events` for `id` using "must exist" as optimistic concurrency
-    async fn commit_exists<T: Aggregate>(
-        &self,
-        id: &T::Id,
-        events: &[T::Event],
-    ) -> Result<(), Self::Error>
+    /// commit `events` for `kind` and `id` using `version` as optimistic concurrency
+    async fn commit<S>(&self, id: S, version: u64, events: &[E]) -> Result<(), Self::Error>
     where
-        T::Id: Serialize,
-        T::Event: Serialize;
+        E: 'async_trait,
+        S: AsRef<str> + Send + Sync;
 
-    /// commit `events` for `id` using "must not exist" as optimistic concurrency
-    async fn commit_not_exists<T: Aggregate>(
-        &self,
-        id: &T::Id,
-        events: &[T::Event],
-    ) -> Result<(), Self::Error>
+    /// commit `events` for `kind` and `id` using "must exist" as optimistic concurrency
+    async fn commit_exists<S: AsRef<str>>(&self, id: S, events: &[E]) -> Result<(), Self::Error>
     where
-        T::Id: Serialize,
-        T::Event: Serialize;
+        E: 'async_trait,
+        S: AsRef<str> + Send + Sync;
 
-    /// simple helper to check if any events exist for `id` aggregate
-    async fn exists<T: Aggregate>(&self, id: T::Id) -> Result<bool, Self::Error>;
+    /// commit `events` for `kind` and `id` using "must not exist" as optimistic concurrency
+    async fn commit_not_exists<S>(&self, id: S, events: &[E]) -> Result<(), Self::Error>
+    where
+        E: 'async_trait,
+        S: AsRef<str> + Send + Sync;
+
+    /// simple helper to check if any events exist for `kind` and `id`
+    async fn exists<S>(&self, id: S) -> Result<bool, Self::Error>
+    where
+        E: 'async_trait,
+        S: AsRef<str> + Send + Sync;
 }

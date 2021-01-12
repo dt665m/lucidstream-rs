@@ -6,7 +6,6 @@ use lucidstream::types::*;
 use lucidstream_ges::includes::eventstore::Client;
 use lucidstream_ges::EventStore;
 use serde::{Deserialize, Serialize};
-// use tokio::time::{delay_for, Duration};
 
 async fn connect_ges() -> Client {
     let settings = "esdb://admin:changeit@localhost:2113?tls=false"
@@ -23,22 +22,29 @@ async fn test_all() {
     let es = EventStore::new(conn.clone(), 5);
     let repo = Repository::new(es);
     let id = "123456".to_string();
+    let stream_id = EventStore::stream_id(Account::kind(), &id);
 
     println!("====== testing ... commands");
-    repo.handle_not_exists::<Account>(id.clone(), Command::Credit { value: 5 })
+    repo.handle_not_exists::<Account>(&stream_id, id.clone(), Command::Credit { value: 5 }, None)
         .await
         .unwrap();
-    repo.handle::<Account>(id.clone(), Command::Credit { value: 5 }, 2)
-        .await
-        .unwrap();
-    repo.handle::<Account>(id.clone(), Command::Debit { value: 5 }, 2)
+    repo.handle::<Account>(
+        &stream_id,
+        id.clone(),
+        Command::Credit { value: 5 },
+        None,
+        2,
+    )
+    .await
+    .unwrap();
+    repo.handle::<Account>(&stream_id, id.clone(), Command::Debit { value: 5 }, None, 2)
         .await
         .unwrap();
     println!("====== complete");
 
-    let stream_id = [Account::kind(), "_", &id.to_string()].concat();
     let mut ar = AggregateRoot::<Account>::new(id.clone());
     let mut f = |e| {
+        println!("{:?}", e);
         ar.apply(&e);
     };
 
@@ -48,6 +54,75 @@ async fn test_all() {
     assert_eq!(ar.state().balance, 5);
     println!("{:?} {:?}", _count, ar);
     println!("====== complete");
+}
+
+// #[test]
+fn benchmark_tokio_1() {
+    let mut runtime = tokio::runtime::Builder::new()
+        .max_threads(1)
+        .basic_scheduler()
+        .enable_time()
+        .build()
+        .unwrap();
+
+    runtime.block_on(async {
+        let conn = connect_ges().await;
+        let es = EventStore::new(conn.clone(), 5);
+        let repo = std::sync::Arc::new(Repository::new(es));
+
+        let id = "123456".to_string();
+        let stream_id = EventStore::stream_id(Account::kind(), &id);
+        repo.handle_not_exists::<Account>(
+            &stream_id,
+            id.clone(),
+            Command::Credit { value: 5 },
+            None,
+        )
+        .await
+        .unwrap();
+
+        malory::judge_me(100, 5, repo.clone(), move |r, _i| async move {
+            let id = "123456".to_string();
+            let stream_id = EventStore::stream_id(Account::kind(), &id);
+            r.handle_not_exists::<Account>(&stream_id, id, Command::Credit { value: 5 }, None)
+                .await
+                .unwrap();
+            true
+        })
+        .await;
+    });
+}
+
+#[tokio::test]
+async fn benchmark() {
+    let conn = connect_ges().await;
+    let es = EventStore::new(conn.clone(), 5);
+    let repo = std::sync::Arc::new(Repository::new(es));
+
+    let id = "1234568".to_string();
+    let stream_id = EventStore::stream_id(Account::kind(), &id);
+    repo.handle_not_exists::<Account>(&stream_id, id.clone(), Command::Credit { value: 5 }, None)
+        .await
+        .unwrap();
+
+    malory::judge_me(10000, 10, repo.clone(), move |r, _i| async move {
+        let id = "123456".to_string();
+        let stream_id = EventStore::stream_id(Account::kind(), &id);
+
+        // raw write
+        // r.inner_ref()
+        //     .commit_exists(stream_id, &vec![Event::Credited { value: 5 }])
+        //     .await
+        //     .unwrap();
+
+        // repo read before write (consistency)
+        r.handle::<Account>(&stream_id, id, Command::Credit { value: 5 }, None, 10)
+            .await
+            .unwrap();
+
+        true
+    })
+    .await;
 }
 
 #[derive(Debug)]

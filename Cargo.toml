@@ -4,6 +4,6 @@ members = [
   "lucidstream",
   "lucidstream-ges",
   "lucidstream-inmemory",
-	
-	"integration-tests"
+
+  "integration-tests"
 ]

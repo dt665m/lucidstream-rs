@@ -23,7 +23,11 @@ untag:
 
 it-ges: local-es 
 	cd ${ROOT_DIR}/integration-tests ; \
-	cargo test -- --nocapture
+	cargo test test_all -- --nocapture
+
+it-ges-benchmark: local-es 
+	cd ${ROOT_DIR}/integration-tests ; \
+	cargo test benchmark -- --nocapture
 
 ###########################################################
 ### Local Deployment

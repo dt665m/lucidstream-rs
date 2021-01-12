@@ -52,8 +52,10 @@ impl<E> Repository<E> {
 
     pub async fn handle<T>(
         &self,
+        stream_id: &str,
         id: T::Id,
         command: T::Command,
+        initial_state: Option<T>,
         retry_count: usize,
     ) -> Result<AggregateRoot<T>, Error>
     where
@@ -63,20 +65,27 @@ impl<E> Repository<E> {
         E: EventStore<T::Event>,
         E::Error: Retryable,
     {
-        let factory = || {
-            let id = id.clone();
-            let command = command.clone();
-
-            self.handle_exists(id, command)
-        };
-
-        retry_future(factory, concurrency_retryable, retry_count).await
+        retry_future(
+            || {
+                self.handle_exists(
+                    stream_id,
+                    id.clone(),
+                    command.clone(),
+                    initial_state.clone(),
+                )
+            },
+            concurrency_retryable,
+            retry_count,
+        )
+        .await
     }
 
     pub async fn handle_not_exists<T>(
         &self,
+        stream_id: &str,
         id: T::Id,
         command: T::Command,
+        initial_state: Option<T>,
     ) -> Result<AggregateRoot<T>, Error>
     where
         T: Aggregate,
@@ -87,15 +96,16 @@ impl<E> Repository<E> {
     {
         // we don't need incur a load from the event store because the commit
         // will guarantee that this aggregate id does not exist / has no events
-        let stream_id = [T::kind(), "_", &id.to_string()].concat();
-        let mut ar = AggregateRoot::<T>::new(id);
+        let initial_state = initial_state.unwrap_or_else(T::default);
+        let mut ar = AggregateRoot::new_with_state(id, initial_state, 0);
+
         let changes = ar
             .handle(command)
             .map_err(|e| Error::EntityCommand(e.to_string()))?
             .take_changes();
 
         self.0
-            .commit_not_exists(&stream_id, &changes)
+            .commit_not_exists(stream_id, &changes)
             .await
             .map_err(|e| Error::Commit(e.to_string(), e.retryable()))
             .map(|_| {
@@ -110,8 +120,10 @@ impl<E> Repository<E> {
     /// and maybe some extreme cases of optimization.  Use sparingly.
     pub async fn handle_exists<T>(
         &self,
+        stream_id: &str,
         id: T::Id,
         command: T::Command,
+        initial_state: Option<T>,
     ) -> Result<AggregateRoot<T>, Error>
     where
         T: Aggregate,
@@ -119,15 +131,15 @@ impl<E> Repository<E> {
         E: EventStore<T::Event>,
         E::Error: Retryable,
     {
-        let stream_id = [T::kind(), "_", &id.to_string()].concat();
-        let mut ar = AggregateRoot::new(id.clone());
+        let initial_state = initial_state.unwrap_or_else(T::default);
+        let mut ar = AggregateRoot::new_with_state(id, initial_state, 0);
         let mut f = |e| {
             ar.apply(&e);
         };
 
         let _count = self
             .0
-            .load_to(&stream_id, &mut f)
+            .load_to(stream_id, &mut f)
             .await
             .map_err(|e| Error::Load(e.to_string()))
             .and_then(|count| match count {
@@ -150,11 +162,12 @@ impl<E> Repository<E> {
             })
     }
 
-    pub async fn dry_run<S: AsRef<str> + Send + Sync, T>(
+    pub async fn dry_run<T>(
         &self,
-        stream_id: S,
+        stream_id: &str,
         id: T::Id,
         command: T::Command,
+        initial_state: Option<T>,
     ) -> Result<AggregateRoot<T>, Error>
     where
         T: Aggregate,
@@ -162,7 +175,8 @@ impl<E> Repository<E> {
         E: EventStore<T::Event>,
         E::Error: Retryable,
     {
-        let mut ar = AggregateRoot::new(id.clone());
+        let initial_state = initial_state.unwrap_or_else(T::default);
+        let mut ar = AggregateRoot::new_with_state(id, initial_state, 0);
         let mut f = |e| {
             ar.apply(&e);
         };

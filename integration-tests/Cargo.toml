@@ -1,6 +1,6 @@
 [package]
 name = "integration-tests"
-version = "0.5.1"
+version = "0.5.3"
 authors = ["Denis Tsai <denistsai@aetheras.io>"]
 edition = "2018"
 
@@ -11,6 +11,7 @@ test = false
 [dependencies]
 lucidstream-ges = { path = "../lucidstream-ges" }
 lucidstream = { path = "../lucidstream" }
+malory = "0.1.0"
 
 async-trait = { version = "0.1" }
 tokio = { version = "0.2.22", features = ["signal", "rt-core", "rt-threaded", "net", "stream", "time", "macros"] }

@@ -2,13 +2,14 @@ use crate::traits::Aggregate;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregateRoot<T: Aggregate> {
     id: T::Id,
     version: u64,
     #[serde(flatten)]
     state: T,
     #[serde(skip_serializing)]
+    #[serde(skip_deserializing)]
     changes: Vec<T::Event>,
 }
 
@@ -27,6 +28,11 @@ where
             version,
             changes: vec![],
         }
+    }
+
+    pub fn new_optional(id: T::Id, maybe_state: Option<(T, u64)>) -> Self {
+        let (initial_state, version) = maybe_state.unwrap_or_else(|| (T::default(), 0));
+        AggregateRoot::new_with_state(id, initial_state, version)
     }
 
     pub fn id(&self) -> &T::Id {
@@ -76,6 +82,13 @@ where
             T::apply(acc, &event)
         });
         self
+    }
+
+    pub fn deconstruct(self) -> (T::Id, T, u64) {
+        let AggregateRoot {
+            id, state, version, ..
+        } = self;
+        (id, state, version)
     }
 }
 

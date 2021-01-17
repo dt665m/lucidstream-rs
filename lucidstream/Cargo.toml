@@ -1,13 +1,14 @@
 [package]
 name = "lucidstream"
-version = "0.5.3"
+version = "0.6.0"
 authors = ["Denis Tsai <dt665m@gmail.com>"]
 edition = "2018"
 license = "MIT"
 repository = "https://github.com/dt665m/lucidstream-rs"
-description = "Event Sourcing Traits"
+description = "Event Sourcing Traits and Types"
 
 [dependencies]
+log = "0.4"
 async-trait = "0.1"
 thiserror = "1"
 futures = "0.3"

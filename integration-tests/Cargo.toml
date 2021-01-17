@@ -1,7 +1,7 @@
 [package]
 name = "integration-tests"
-version = "0.5.3"
-authors = ["Denis Tsai <denistsai@aetheras.io>"]
+version = "0.6.0"
+authors = ["Denis Tsai <dt665m@gmail.com>"]
 edition = "2018"
 
 [lib]

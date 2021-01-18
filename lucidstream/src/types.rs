@@ -246,7 +246,7 @@ mod test {
         ];
         let ar_version = history.len() as u64;
 
-        let mut ar = AggregateRoot::<Account>::new("abcd1".to_owned());
+        let mut ar = AggregateRoot::<Account>::default("abcd1".to_owned());
         ar.apply_iter(history);
 
         assert_eq!(*ar.id(), "abcd1".to_owned());

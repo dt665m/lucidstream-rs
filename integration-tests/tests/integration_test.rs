@@ -20,29 +20,24 @@ async fn connect_ges() -> Client {
 async fn test_all() {
     let conn = connect_ges().await;
     let es = EventStore::new(conn.clone(), 5);
-    let repo = Repository::new(es);
+    let repo = Repository::new(es, ());
     let id = "123456".to_string();
     let stream_id = EventStore::stream_id(Account::kind(), &id);
 
     println!("====== testing ... commands");
-    repo.handle_not_exists::<Account>(&stream_id, id.clone(), Command::Credit { value: 5 }, None)
+    let state = AggregateRoot::<Account>::default(id.clone());
+    repo.handle_not_exists::<Account>(&stream_id, state.clone(), Command::Credit { value: 5 })
         .await
         .unwrap();
-    repo.handle::<Account>(
-        &stream_id,
-        id.clone(),
-        Command::Credit { value: 5 },
-        None,
-        2,
-    )
-    .await
-    .unwrap();
-    repo.handle::<Account>(&stream_id, id.clone(), Command::Debit { value: 5 }, None, 2)
+    repo.handle::<Account>(&stream_id, id.clone(), Command::Credit { value: 5 }, 2)
+        .await
+        .unwrap();
+    repo.handle::<Account>(&stream_id, id.clone(), Command::Debit { value: 5 }, 2)
         .await
         .unwrap();
     println!("====== complete");
 
-    let mut ar = AggregateRoot::<Account>::new(id.clone());
+    let mut ar = AggregateRoot::<Account>::default(id.clone());
     let mut f = |e| {
         println!("{:?}", e);
         ar.apply(&e);
@@ -68,23 +63,20 @@ fn benchmark_tokio_1() {
     runtime.block_on(async {
         let conn = connect_ges().await;
         let es = EventStore::new(conn.clone(), 5);
-        let repo = std::sync::Arc::new(Repository::new(es));
+        let repo = std::sync::Arc::new(Repository::new(es, ()));
 
         let id = "123456".to_string();
         let stream_id = EventStore::stream_id(Account::kind(), &id);
-        repo.handle_not_exists::<Account>(
-            &stream_id,
-            id.clone(),
-            Command::Credit { value: 5 },
-            None,
-        )
-        .await
-        .unwrap();
+        let state = AggregateRoot::default(id);
+        repo.handle_not_exists::<Account>(&stream_id, state, Command::Credit { value: 5 })
+            .await
+            .unwrap();
 
         malory::judge_me(100, 5, repo.clone(), move |r, _i| async move {
             let id = "123456".to_string();
             let stream_id = EventStore::stream_id(Account::kind(), &id);
-            r.handle_not_exists::<Account>(&stream_id, id, Command::Credit { value: 5 }, None)
+            let state = AggregateRoot::default(id);
+            r.handle_not_exists::<Account>(&stream_id, state, Command::Credit { value: 5 })
                 .await
                 .unwrap();
             true
@@ -97,11 +89,12 @@ fn benchmark_tokio_1() {
 async fn benchmark() {
     let conn = connect_ges().await;
     let es = EventStore::new(conn.clone(), 5);
-    let repo = std::sync::Arc::new(Repository::new(es));
+    let repo = std::sync::Arc::new(Repository::new(es, ()));
 
     let id = "1234568".to_string();
     let stream_id = EventStore::stream_id(Account::kind(), &id);
-    repo.handle_not_exists::<Account>(&stream_id, id.clone(), Command::Credit { value: 5 }, None)
+    let state = AggregateRoot::default(id);
+    repo.handle_not_exists::<Account>(&stream_id, state, Command::Credit { value: 5 })
         .await
         .unwrap();
 
@@ -116,7 +109,7 @@ async fn benchmark() {
         //     .unwrap();
 
         // repo read before write (consistency)
-        r.handle::<Account>(&stream_id, id, Command::Credit { value: 5 }, None, 10)
+        r.handle::<Account>(&stream_id, id, Command::Credit { value: 5 }, 10)
             .await
             .unwrap();
 
@@ -180,7 +173,7 @@ impl Display for Event {
     }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Account {
     pub owner: String,
     pub suspended: bool,

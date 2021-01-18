@@ -1,13 +1,10 @@
-use lucidstream::repository::Retryable;
-use lucidstream::traits::EventStore as EventStoreT;
-
 use std::fmt::Display;
 
 use async_trait::async_trait;
-use futures::prelude::*;
-use serde::{de::DeserializeOwned, Serialize};
-
 use eventstore::{Client, EventData, ExpectedVersion, ReadResult};
+use futures::prelude::*;
+use lucidstream::traits::{EventStore as EventStoreT, Retryable};
+use serde::{de::DeserializeOwned, Serialize};
 
 pub mod includes {
     pub use eventstore;

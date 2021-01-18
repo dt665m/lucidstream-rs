@@ -71,3 +71,7 @@ where
         E: 'async_trait,
         S: AsRef<str> + Send + Sync;
 }
+
+pub trait Retryable {
+    fn retryable(&self) -> bool;
+}

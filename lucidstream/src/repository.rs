@@ -1,14 +1,11 @@
-use crate::traits::{Aggregate, EventStore};
+use crate::traits::{Aggregate, EventStore, Retryable};
 use crate::types::AggregateRoot;
 use crate::utils::retry_future;
 
 use std::fmt::Debug;
 
+use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
-
-pub trait Retryable {
-    fn retryable(&self) -> bool;
-}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -38,16 +35,55 @@ pub fn concurrency_retryable<T>(result: &Result<T, Error>) -> bool {
     }
 }
 
-#[derive(Clone)]
-pub struct Repository<E>(E);
+#[async_trait]
+pub trait SnapshotStore {
+    async fn get<T, S>(&self, key: S) -> Option<AggregateRoot<T>>
+    where
+        T: Aggregate + DeserializeOwned + Send,
+        T::Id: DeserializeOwned + Send,
+        S: AsRef<str> + Send;
 
-impl<E> Repository<E> {
-    pub fn new(eventstore: E) -> Self {
-        Self(eventstore)
+    async fn set<T, S>(&self, key: S, ar: &AggregateRoot<T>)
+    where
+        T: Aggregate + Serialize + Send,
+        T::Id: Serialize,
+        S: AsRef<str> + Send;
+}
+
+#[async_trait]
+impl SnapshotStore for () {
+    async fn get<T, S>(&self, _key: S) -> Option<AggregateRoot<T>>
+    where
+        T: Aggregate + Send,
+        S: AsRef<str> + Send,
+    {
+        None
+    }
+
+    async fn set<T, S>(&self, _key: S, _ar: &AggregateRoot<T>)
+    where
+        T: Aggregate + Send,
+        S: AsRef<str> + Send,
+    {
+    }
+}
+
+#[derive(Clone)]
+pub struct Repository<E, S> {
+    eventstore: E,
+    cache: S,
+}
+
+impl<E, S> Repository<E, S>
+where
+    S: SnapshotStore,
+{
+    pub fn new(eventstore: E, cache: S) -> Self {
+        Self { eventstore, cache }
     }
 
     pub fn inner_ref(&self) -> &E {
-        &self.0
+        &self.eventstore
     }
 
     /// Handle command using the ```default()``` as initial state AggregateRoot's version as
@@ -60,7 +96,8 @@ impl<E> Repository<E> {
         retry_count: usize,
     ) -> Result<AggregateRoot<T>, Error>
     where
-        T: Aggregate,
+        T: Aggregate + Serialize + DeserializeOwned,
+        T::Id: Serialize + DeserializeOwned,
         T::Event: Serialize + DeserializeOwned,
         T::Error: std::error::Error + Send + 'static,
         E: EventStore<T::Event>,
@@ -85,7 +122,8 @@ impl<E> Repository<E> {
         retry_count: usize,
     ) -> Result<AggregateRoot<T>, Error>
     where
-        T: Aggregate,
+        T: Aggregate + Serialize + DeserializeOwned,
+        T::Id: Serialize + DeserializeOwned,
         T::Event: Serialize + DeserializeOwned,
         T::Error: std::error::Error + Send + 'static,
         E: EventStore<T::Event>,
@@ -107,7 +145,8 @@ impl<E> Repository<E> {
         command: T::Command,
     ) -> Result<AggregateRoot<T>, Error>
     where
-        T: Aggregate,
+        T: Aggregate + Serialize + DeserializeOwned,
+        T::Id: Serialize + DeserializeOwned,
         T::Event: Serialize + DeserializeOwned,
         E: EventStore<T::Event>,
         E::Error: Retryable,
@@ -117,7 +156,8 @@ impl<E> Repository<E> {
             .await?;
         let changes = ar.take_changes();
 
-        self.0
+        let ar = self
+            .eventstore
             .commit(&stream_id, ar.version(), &changes)
             .await
             .map_err(|e| {
@@ -130,7 +170,10 @@ impl<E> Repository<E> {
             .map(|_| {
                 ar.apply_iter(changes);
                 ar
-            })
+            })?;
+
+        self.cache.set(stream_id, &ar).await;
+        Ok(ar)
     }
 
     /// Handle commands using the a non-existing stream as optimistic concurrency.  
@@ -141,7 +184,8 @@ impl<E> Repository<E> {
         command: T::Command,
     ) -> Result<AggregateRoot<T>, Error>
     where
-        T: Aggregate,
+        T: Aggregate + Serialize + DeserializeOwned,
+        T::Id: Serialize + DeserializeOwned,
         T::Event: Serialize + DeserializeOwned,
         T::Error: std::error::Error + Send + 'static,
         E: EventStore<T::Event>,
@@ -155,7 +199,7 @@ impl<E> Repository<E> {
             .map_err(|e| Error::Aggregate { source: e.into() })?
             .take_changes();
 
-        self.0
+        self.eventstore
             .commit_not_exists(stream_id, &changes)
             .await
             .map_err(|e| {
@@ -182,7 +226,8 @@ impl<E> Repository<E> {
         command: T::Command,
     ) -> Result<AggregateRoot<T>, Error>
     where
-        T: Aggregate,
+        T: Aggregate + Serialize + DeserializeOwned,
+        T::Id: Serialize + DeserializeOwned,
         T::Event: Serialize + DeserializeOwned,
         E: EventStore<T::Event>,
         E::Error: Retryable,
@@ -192,7 +237,8 @@ impl<E> Repository<E> {
             .await?;
         let changes = ar.take_changes();
 
-        self.0
+        let ar = self
+            .eventstore
             .commit_exists(&stream_id, &changes)
             .await
             .map_err(|e| {
@@ -205,7 +251,10 @@ impl<E> Repository<E> {
             .map(|_| {
                 ar.apply_iter(changes);
                 ar
-            })
+            })?;
+
+        self.cache.set(stream_id, &ar).await;
+        Ok(ar)
     }
 
     /// Load Aggregate and handle command without committing to eventstore  
@@ -217,7 +266,8 @@ impl<E> Repository<E> {
         allow_unknown: bool,
     ) -> Result<AggregateRoot<T>, Error>
     where
-        T: Aggregate,
+        T: Aggregate + DeserializeOwned,
+        T::Id: DeserializeOwned,
         T::Event: Serialize + DeserializeOwned,
         E: EventStore<T::Event>,
     {
@@ -236,17 +286,19 @@ impl<E> Repository<E> {
         allow_unknown: bool,
     ) -> Result<AggregateRoot<T>, Error>
     where
-        T: Aggregate,
+        T: Aggregate + DeserializeOwned,
+        T::Id: DeserializeOwned,
         T::Event: Serialize + DeserializeOwned,
         E: EventStore<T::Event>,
     {
-        let mut ar = state;
+        let mut ar = self.cache.get(stream_id).await.unwrap_or(state);
+        // let mut ar = state;
         let mut f = |e| {
             ar.apply(&e);
         };
 
         let _count = self
-            .0
+            .eventstore
             .load_to(stream_id, &mut f)
             .await
             .map_err(|e| Error::EventStore {

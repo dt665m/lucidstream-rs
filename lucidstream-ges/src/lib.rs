@@ -52,6 +52,13 @@ impl EventStore {
         [kind, "_", id].concat()
     }
 
+    pub fn to_expected_version(aggregate_version: u64) -> Option<u64> {
+        match aggregate_version {
+            0 => None,
+            n => Some(n - 1),
+        }
+    }
+
     pub async fn manual_commit(
         &self,
         stream_id: &str,

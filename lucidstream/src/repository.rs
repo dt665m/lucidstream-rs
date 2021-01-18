@@ -112,7 +112,9 @@ impl<E> Repository<E> {
         E: EventStore<T::Event>,
         E::Error: Retryable,
     {
-        let mut ar = self.dry_run_with_init(stream_id, state, command).await?;
+        let mut ar = self
+            .dry_run_with_init(stream_id, state, command, false)
+            .await?;
         let changes = ar.take_changes();
 
         self.0
@@ -185,7 +187,9 @@ impl<E> Repository<E> {
         E: EventStore<T::Event>,
         E::Error: Retryable,
     {
-        let mut ar = self.dry_run_with_init(stream_id, state, command).await?;
+        let mut ar = self
+            .dry_run_with_init(stream_id, state, command, false)
+            .await?;
         let changes = ar.take_changes();
 
         self.0
@@ -210,6 +214,7 @@ impl<E> Repository<E> {
         stream_id: &str,
         id: T::Id,
         command: T::Command,
+        allow_unknown: bool,
     ) -> Result<AggregateRoot<T>, Error>
     where
         T: Aggregate,
@@ -217,7 +222,8 @@ impl<E> Repository<E> {
         E: EventStore<T::Event>,
     {
         let state = AggregateRoot::default(id);
-        self.dry_run_with_init(stream_id, state, command).await
+        self.dry_run_with_init(stream_id, state, command, allow_unknown)
+            .await
     }
 
     /// Load Aggregate and handle command using the specified state without committing to
@@ -227,6 +233,7 @@ impl<E> Repository<E> {
         stream_id: &str,
         state: AggregateRoot<T>,
         command: T::Command,
+        allow_unknown: bool,
     ) -> Result<AggregateRoot<T>, Error>
     where
         T: Aggregate,
@@ -246,8 +253,8 @@ impl<E> Repository<E> {
                 source: e.into(),
                 retryable: false,
             })
-            .and_then(|count| match count {
-                0 => Err(Error::UnknownEntity),
+            .and_then(|count| match (count, allow_unknown) {
+                (0, false) => Err(Error::UnknownEntity),
                 _ => Ok(count),
             })?;
 

@@ -17,8 +17,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("EventStore error: `{0}`")]
-    EventStore(String),
+    #[error("EventStore error: `{source}`")]
+    EventStore { source: eventstore::Error },
 
     #[error("Wrong expected version")]
     WrongExpectedVersion,
@@ -54,7 +54,7 @@ impl EventStore {
 
     pub async fn manual_commit(
         &self,
-        stream_id: String,
+        stream_id: &str,
         version: Option<u64>,
         events: Vec<EventData>,
     ) -> Result<()> {
@@ -64,7 +64,7 @@ impl EventStore {
             .expected_version(version.map_or(ExpectedVersion::NoStream, ExpectedVersion::Exact))
             .send(stream::iter(events))
             .await
-            .map_err(|e| Error::EventStore(e.to_string()))?;
+            .map_err(|e| Error::EventStore { source: e.into() })?;
 
         log::debug!("write result: {:?}", write_result);
         write_result
@@ -150,7 +150,7 @@ where
             .start_from_beginning()
             .execute(1)
             .await
-            .map_err(|e| Error::EventStore(e.to_string()))?;
+            .map_err(|e| Error::EventStore { source: e.into() })?;
 
         match res {
             ReadResult::Ok(_) => Ok(true),
@@ -178,7 +178,7 @@ where
         .expected_version(expected_version)
         .send(stream::iter(event_datum))
         .await
-        .map_err(|e| Error::EventStore(e.to_string()))?;
+        .map_err(|e| Error::EventStore { source: e.into() })?;
 
     log::debug!("write result: {:?}", write_result);
     write_result
@@ -235,14 +235,14 @@ where
         .start_from(start_position)
         .execute(load_count)
         .await
-        .map_err(|e| Error::EventStore(e.to_string()))?;
+        .map_err(|e| Error::EventStore { source: e.into() })?;
 
     let mut count = 0;
     if let ReadResult::Ok(mut stream) = res {
         while let Some(event) = stream
             .try_next()
             .await
-            .map_err(|e| Error::EventStore(e.to_string()))?
+            .map_err(|e| Error::EventStore { source: e.into() })?
         {
             let event = event.get_original_event();
             let payload: E = event.as_json()?;

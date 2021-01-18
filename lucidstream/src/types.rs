@@ -5,9 +5,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggregateRoot<T: Aggregate> {
     id: T::Id,
+
     version: u64,
+
     #[serde(flatten)]
     state: T,
+
     #[serde(skip_serializing)]
     #[serde(skip_deserializing)]
     changes: Vec<T::Event>,
@@ -17,11 +20,7 @@ impl<T: Aggregate> AggregateRoot<T>
 where
     T::Error: std::error::Error,
 {
-    pub fn new(id: T::Id) -> Self {
-        AggregateRoot::<T>::new_with_state(id, T::default(), 0)
-    }
-
-    pub fn new_with_state(id: T::Id, state: T, version: u64) -> Self {
+    pub fn new(id: T::Id, state: T, version: u64) -> Self {
         Self {
             id,
             state,
@@ -30,9 +29,8 @@ where
         }
     }
 
-    pub fn new_optional(id: T::Id, maybe_state: Option<(T, u64)>) -> Self {
-        let (initial_state, version) = maybe_state.unwrap_or_else(|| (T::default(), 0));
-        AggregateRoot::new_with_state(id, initial_state, version)
+    pub fn default(id: T::Id) -> Self {
+        AggregateRoot::<T>::new(id, T::default(), 0)
     }
 
     pub fn id(&self) -> &T::Id {
@@ -82,13 +80,6 @@ where
             T::apply(acc, &event)
         });
         self
-    }
-
-    pub fn deconstruct(self) -> (T::Id, T, u64) {
-        let AggregateRoot {
-            id, state, version, ..
-        } = self;
-        (id, state, version)
     }
 }
 

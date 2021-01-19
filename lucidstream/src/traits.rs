@@ -14,7 +14,7 @@ pub trait Aggregate: Default + Debug + Clone + Send + Sync {
     type Event: Display + Clone + Send + Sync;
 
     /// error type
-    type Error: std::error::Error + Send + 'static;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     /// aggregate type description
     fn kind() -> &'static str;
@@ -31,7 +31,7 @@ pub trait EventStore<E>
 where
     E: Serialize + DeserializeOwned + Display + Send + Sync,
 {
-    type Error: std::error::Error + 'static;
+    type Error: std::error::Error + Send + Sync + 'static;
 
     /// load events based on `kind` and `id` and applys it into `f` callback.  Returns the total
     /// count loaded  

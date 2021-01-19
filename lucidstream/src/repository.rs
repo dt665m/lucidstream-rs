@@ -11,13 +11,13 @@ use serde::{de::DeserializeOwned, Serialize};
 pub enum Error {
     #[error("EventStore error: `{source}`")]
     EventStore {
-        source: Box<dyn std::error::Error + 'static>,
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
         retryable: bool,
     },
 
     #[error("Entity command error: `{source}`")]
     Aggregate {
-        source: Box<dyn std::error::Error + 'static>,
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
     },
 
     #[error("Duplicate entity error")]

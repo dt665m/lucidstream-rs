@@ -50,36 +50,28 @@ pub trait SnapshotStore {
         S: AsRef<str> + Send;
 }
 
-#[async_trait]
-impl SnapshotStore for () {
-    async fn get<T, S>(&self, _key: S) -> Option<AggregateRoot<T>>
-    where
-        T: Aggregate + Send,
-        S: AsRef<str> + Send,
-    {
-        None
-    }
-
-    async fn set<T, S>(&self, _key: S, _ar: &AggregateRoot<T>)
-    where
-        T: Aggregate + Send,
-        S: AsRef<str> + Send,
-    {
-    }
-}
-
 #[derive(Clone)]
 pub struct Repository<E, S> {
     eventstore: E,
-    cache: S,
+    cache: Option<S>,
 }
 
 impl<E, S> Repository<E, S>
 where
     S: SnapshotStore,
 {
-    pub fn new(eventstore: E, cache: S) -> Self {
-        Self { eventstore, cache }
+    pub fn new(eventstore: E) -> Self {
+        Self {
+            eventstore,
+            cache: None,
+        }
+    }
+
+    pub fn with_cache(self, cache: S) -> Self {
+        Self {
+            cache: Some(cache),
+            ..self
+        }
     }
 
     pub fn inner_ref(&self) -> &E {
@@ -172,7 +164,9 @@ where
                 ar
             })?;
 
-        self.cache.set(stream_id, &ar).await;
+        if let Some(ref cache) = self.cache {
+            cache.set(stream_id, &ar).await;
+        }
         Ok(ar)
     }
 
@@ -253,7 +247,9 @@ where
                 ar
             })?;
 
-        self.cache.set(stream_id, &ar).await;
+        if let Some(ref cache) = self.cache {
+            cache.set(stream_id, &ar).await;
+        }
         Ok(ar)
     }
 
@@ -291,8 +287,10 @@ where
         T::Event: Serialize + DeserializeOwned,
         E: EventStore<T::Event>,
     {
-        let mut ar = self.cache.get(stream_id).await.unwrap_or(state);
-        // let mut ar = state;
+        let mut ar = match self.cache {
+            Some(ref cache) => cache.get(stream_id).await.unwrap_or(state),
+            _ => state,
+        };
         let mut f = |e| {
             ar.apply(&e);
         };

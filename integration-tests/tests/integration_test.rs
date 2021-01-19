@@ -20,7 +20,7 @@ async fn connect_ges() -> Client {
 async fn test_all() {
     let conn = connect_ges().await;
     let es = EventStore::new(conn.clone(), 5);
-    let repo = Repository::new(es, ());
+    let repo = Repository::<_, ()>::new(es);
     let id = "123456".to_string();
     let stream_id = EventStore::stream_id(Account::kind(), &id);
 
@@ -63,7 +63,7 @@ fn benchmark_tokio_1() {
     runtime.block_on(async {
         let conn = connect_ges().await;
         let es = EventStore::new(conn.clone(), 5);
-        let repo = std::sync::Arc::new(Repository::new(es, ()));
+        let repo = std::sync::Arc::new(Repository::<_, ()>::new(es));
 
         let id = "123456".to_string();
         let stream_id = EventStore::stream_id(Account::kind(), &id);
@@ -89,7 +89,7 @@ fn benchmark_tokio_1() {
 async fn benchmark() {
     let conn = connect_ges().await;
     let es = EventStore::new(conn.clone(), 5);
-    let repo = std::sync::Arc::new(Repository::new(es, ()));
+    let repo = std::sync::Arc::new(Repository::<_, ()>::new(es));
 
     let id = "1234568".to_string();
     let stream_id = EventStore::stream_id(Account::kind(), &id);

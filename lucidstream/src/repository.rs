@@ -11,12 +11,14 @@ use serde::{de::DeserializeOwned, Serialize};
 pub enum Error {
     #[error("EventStore error: `{source}`")]
     EventStore {
-        source: Box<dyn std::error::Error>,
+        source: Box<dyn std::error::Error + 'static>,
         retryable: bool,
     },
 
     #[error("Entity command error: `{source}`")]
-    Aggregate { source: Box<dyn std::error::Error> },
+    Aggregate {
+        source: Box<dyn std::error::Error + 'static>,
+    },
 
     #[error("Duplicate entity error")]
     DuplicateEntity,
@@ -48,6 +50,23 @@ pub trait SnapshotStore {
         T: Aggregate + Serialize + Send,
         T::Id: Serialize,
         S: AsRef<str> + Send;
+}
+
+#[async_trait]
+impl SnapshotStore for () {
+    async fn get<T, S>(&self, _key: S) -> Option<AggregateRoot<T>>
+    where
+        T: Aggregate + DeserializeOwned + Send,
+        S: AsRef<str> + Send,
+    {
+        None
+    }
+    async fn set<T, S>(&self, _key: S, _ar: &AggregateRoot<T>)
+    where
+        T: Aggregate + Serialize + Send,
+        S: AsRef<str> + Send,
+    {
+    }
 }
 
 #[derive(Clone)]

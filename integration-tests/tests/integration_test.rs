@@ -7,6 +7,10 @@ use lucidstream_ges::includes::eventstore::Client;
 use lucidstream_ges::EventStore;
 use serde::{Deserialize, Serialize};
 
+fn init() {
+    let _ = pretty_env_logger::try_init();
+}
+
 async fn connect_ges() -> Client {
     let settings = "esdb://admin:changeit@localhost:2113?tls=false"
         .parse()
@@ -18,13 +22,15 @@ async fn connect_ges() -> Client {
 
 #[tokio::test]
 async fn test_all() {
+    init();
+    log::info!("TEST_ALL");
     let conn = connect_ges().await;
     let es = EventStore::new(conn.clone(), 5);
     let repo = Repository::<_, ()>::new(es);
     let id = "123456".to_string();
     let stream_id = EventStore::stream_id(Account::kind(), &id);
 
-    println!("====== testing ... commands");
+    log::info!("====== testing ... commands");
     let state = AggregateRoot::<Account>::default(id.clone());
     repo.handle_not_exists::<Account>(&stream_id, state.clone(), Command::Credit { value: 5 })
         .await
@@ -35,84 +41,44 @@ async fn test_all() {
     repo.handle::<Account>(&stream_id, id.clone(), Command::Debit { value: 5 }, 2)
         .await
         .unwrap();
-    println!("====== complete");
+    log::info!("====== complete");
 
     let mut ar = AggregateRoot::<Account>::default(id.clone());
     let mut f = |e| {
-        println!("{:?}", e);
         ar.apply(&e);
     };
 
-    println!("====== testing ... event loading and aggregate rehydration");
+    log::info!("====== testing ... event loading and aggregate rehydration");
     let _count = repo.inner_ref().load_to(&stream_id, &mut f).await.unwrap();
     assert_eq!(ar.id(), &id);
     assert_eq!(ar.state().balance, 5);
-    println!("{:?} {:?}", _count, ar);
-    println!("====== complete");
-}
-
-// #[test]
-fn benchmark_tokio_1() {
-    let mut runtime = tokio::runtime::Builder::new()
-        .max_threads(1)
-        .basic_scheduler()
-        .enable_time()
-        .build()
-        .unwrap();
-
-    runtime.block_on(async {
-        let conn = connect_ges().await;
-        let es = EventStore::new(conn.clone(), 5);
-        let repo = std::sync::Arc::new(Repository::<_, ()>::new(es));
-
-        let id = "123456".to_string();
-        let stream_id = EventStore::stream_id(Account::kind(), &id);
-        let state = AggregateRoot::default(id);
-        repo.handle_not_exists::<Account>(&stream_id, state, Command::Credit { value: 5 })
-            .await
-            .unwrap();
-
-        malory::judge_me(100, 5, repo.clone(), move |r, _i| async move {
-            let id = "123456".to_string();
-            let stream_id = EventStore::stream_id(Account::kind(), &id);
-            let state = AggregateRoot::default(id);
-            r.handle_not_exists::<Account>(&stream_id, state, Command::Credit { value: 5 })
-                .await
-                .unwrap();
-            true
-        })
-        .await;
-    });
+    log::info!("{:?} {:?}", _count, ar);
+    log::info!("====== complete");
 }
 
 #[tokio::test]
 async fn benchmark() {
+    init();
+    log::debug!("BENCHMARK");
+
     let conn = connect_ges().await;
     let es = EventStore::new(conn.clone(), 5);
     let repo = std::sync::Arc::new(Repository::<_, ()>::new(es));
 
-    let id = "1234568".to_string();
+    let id = "654321".to_string();
     let stream_id = EventStore::stream_id(Account::kind(), &id);
     let state = AggregateRoot::default(id);
     repo.handle_not_exists::<Account>(&stream_id, state, Command::Credit { value: 5 })
         .await
         .unwrap();
 
-    malory::judge_me(10000, 10, repo.clone(), move |r, _i| async move {
-        let id = "123456".to_string();
+    malory::judge_me(10000, 5, repo.clone(), move |r, _i| async move {
+        let id = "654321".to_string();
         let stream_id = EventStore::stream_id(Account::kind(), &id);
-
-        // raw write
-        // r.inner_ref()
-        //     .commit_exists(stream_id, &vec![Event::Credited { value: 5 }])
-        //     .await
-        //     .unwrap();
-
-        // repo read before write (consistency)
-        r.handle::<Account>(&stream_id, id, Command::Credit { value: 5 }, 10)
+        let state = AggregateRoot::default(id);
+        r.handle_exists::<Account>(&stream_id, state, Command::Credit { value: 5 })
             .await
             .unwrap();
-
         true
     })
     .await;

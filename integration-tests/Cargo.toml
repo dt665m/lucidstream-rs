@@ -1,6 +1,6 @@
 [package]
 name = "integration-tests"
-version = "0.6.6"
+version = "0.7.0"
 authors = ["Denis Tsai <dt665m@gmail.com>"]
 edition = "2018"
 
@@ -11,11 +11,13 @@ test = false
 [dependencies]
 lucidstream-ges = { path = "../lucidstream-ges" }
 lucidstream = { path = "../lucidstream" }
-malory = "0.1.0"
 
+log = "0.4"
+malory = "0.2.1"
+pretty_env_logger = "0.4"
 async-trait = { version = "0.1" }
-tokio = { version = "0.2.22", features = ["signal", "rt-core", "rt-threaded", "net", "stream", "time", "macros"] }
+tokio = { version = "1", features = ["signal", "rt-multi-thread", "net", "time", "macros"] }
 serde = { version = "1.0.114", features = ["derive"] }
-serde_json = "1.0.57"
+serde_json = "1"
 bytes = { version = "0.5" }
 

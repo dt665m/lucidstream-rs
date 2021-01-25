@@ -1,6 +1,6 @@
 [package]
 name = "lucidstream-ges"
-version = "0.7.0"
+version = "0.7.1"
 authors = ["Denis Tsai <dt665m@gmail.com>"]
 edition = "2018"
 license = "MIT"
@@ -12,7 +12,7 @@ lucidstream = { path = "../lucidstream" }
 
 log = "0.4"
 # eventstore = "0.9.9"
-eventstore = { git = "https://github.com/dt665m/EventStoreDB-Client-Rust", rev = "a8ea3e38f540aba01be8541be196fa92018a0b38" } 
+eventstore = { git = "https://github.com/dt665m/EventStoreDB-Client-Rust", rev = "8ef4fce850252ac68fc78ffdb716036513a7ed10" } 
 async-trait = "0.1"
 thiserror = "1"
 futures = "0.3"

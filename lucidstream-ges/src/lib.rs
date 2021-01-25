@@ -36,6 +36,11 @@ impl Retryable for Error {
     }
 }
 
+pub struct ManualEntry {
+    version: Option<u64>,
+    events: Vec<EventData>,
+}
+
 impl EventStore {
     pub fn new(inner: Client, batch_count: u64) -> Self {
         Self { inner, batch_count }
@@ -55,16 +60,69 @@ impl EventStore {
             n => Some(n - 1),
         }
     }
+}
 
-    pub async fn manual_commit(
+#[async_trait]
+impl EventStoreT for EventStore {
+    type Id = String;
+    type ManualEntry = ManualEntry;
+    type Error = Error;
+
+    async fn load_to<E, F>(&self, id: &Self::Id, f: &mut F) -> Result<u64>
+    where
+        E: DeserializeOwned + Send + Sync,
+        F: FnMut(E) + Send + Sync,
+    {
+        load_all_events::<E, _>(&self.inner, id, self.batch_count, f).await
+    }
+
+    async fn load_history<E>(&self, id: &Self::Id) -> Result<Vec<E>>
+    where
+        E: DeserializeOwned + Send + Sync,
+    {
+        let mut history = vec![];
+        let mut f = |e| {
+            history.push(e);
+        };
+        let _ = load_all_events::<E, _>(&self.inner, id, self.batch_count, &mut f).await?;
+        Ok(history)
+    }
+
+    async fn commit<E>(&self, id: &Self::Id, version: u64, events: &[E]) -> Result<()>
+    where
+        E: Serialize + Display + Send + Sync,
+    {
+        // eventstore event index starts at 0.  We use u64 for aggregate starting at 1 for the
+        // first event, so the -1 is required to align with the store
+        commit(&self.inner, id, events, ExpectedVersion::Exact(version - 1)).await
+    }
+
+    /// commit `events` for `id` using "must exist" as optimistic concurrency
+    async fn commit_exists<E>(&self, id: &Self::Id, events: &[E]) -> Result<()>
+    where
+        E: Serialize + Display + Send + Sync,
+    {
+        commit(&self.inner, id, events, ExpectedVersion::StreamExists).await
+    }
+
+    /// commit `events` for `id` using "must not exist" as optimistic concurrency
+    async fn commit_not_exists<E>(&self, id: &Self::Id, events: &[E]) -> Result<()>
+    where
+        E: Serialize + Display + Send + Sync,
+    {
+        commit(&self.inner, id, events, ExpectedVersion::NoStream).await
+    }
+
+    /// commit `events` for `kind` and `id` using "must not exist" as optimistic concurrency
+    async fn manual_commit(
         &self,
-        stream_id: &str,
-        version: Option<u64>,
-        events: Vec<EventData>,
-    ) -> Result<()> {
+        id: &Self::Id,
+        entry: Self::ManualEntry,
+    ) -> Result<(), Self::Error> {
+        let ManualEntry { version, events } = entry;
         let write_result = self
             .inner
-            .write_events(stream_id)
+            .write_events(id)
             .expected_version(version.map_or(ExpectedVersion::NoStream, ExpectedVersion::Exact))
             .send(stream::iter(events))
             .await
@@ -75,82 +133,11 @@ impl EventStore {
             .map(|_| ())
             .map_err(|_| Error::WrongExpectedVersion)
     }
-}
 
-#[async_trait]
-impl<E> EventStoreT<E> for EventStore
-where
-    E: Serialize + DeserializeOwned + Display + Send + Sync,
-{
-    type Error = Error;
-
-    async fn load_to<S, F>(&self, id: S, f: &mut F) -> Result<u64>
-    where
-        E: 'async_trait,
-        F: FnMut(E) + Send + Sync,
-        S: AsRef<str> + Send + Sync,
-    {
-        load_all_events::<E, _>(&self.inner, id.as_ref(), self.batch_count, f).await
-    }
-
-    async fn load_history<S>(&self, id: S) -> Result<Vec<E>>
-    where
-        E: 'async_trait,
-        S: AsRef<str> + Send + Sync,
-    {
-        let mut history = vec![];
-        let mut f = |e| {
-            history.push(e);
-        };
-        let _ = load_all_events::<E, _>(&self.inner, id.as_ref(), self.batch_count, &mut f).await?;
-        Ok(history)
-    }
-
-    async fn commit<S>(&self, id: S, version: u64, events: &[E]) -> Result<()>
-    where
-        S: AsRef<str> + Send + Sync,
-    {
-        // eventstore event index starts at 0.  We use u64 for aggregate starting at 1 for the
-        // first event, so the -1 is required to align with the store
-        commit(
-            &self.inner,
-            id.as_ref(),
-            events,
-            ExpectedVersion::Exact(version - 1),
-        )
-        .await
-    }
-
-    /// commit `events` for `id` using "must exist" as optimistic concurrency
-    async fn commit_exists<S>(&self, id: S, events: &[E]) -> Result<()>
-    where
-        S: AsRef<str> + Send + Sync,
-    {
-        commit(
-            &self.inner,
-            id.as_ref(),
-            events,
-            ExpectedVersion::StreamExists,
-        )
-        .await
-    }
-
-    /// commit `events` for `id` using "must not exist" as optimistic concurrency
-    async fn commit_not_exists<S>(&self, id: S, events: &[E]) -> Result<()>
-    where
-        S: AsRef<str> + Send + Sync,
-    {
-        commit(&self.inner, id.as_ref(), events, ExpectedVersion::NoStream).await
-    }
-
-    async fn exists<S>(&self, id: S) -> Result<bool>
-    where
-        E: 'async_trait,
-        S: AsRef<str> + Send + Sync,
-    {
+    async fn exists(&self, id: &Self::Id) -> Result<bool> {
         let res = self
             .inner
-            .read_stream(id.as_ref())
+            .read_stream(id)
             .start_from_beginning()
             .execute(1)
             .await

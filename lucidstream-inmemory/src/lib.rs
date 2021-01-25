@@ -29,18 +29,17 @@ impl Default for MemEventStore {
 }
 
 #[async_trait]
-impl<E> EventStoreT<E> for MemEventStore
-where
-    E: Serialize + DeserializeOwned + Display + Send + Sync + 'static,
-{
+impl EventStoreT for MemEventStore {
+    type Id = String;
+    type ManualEntry = ();
     type Error = Error;
 
-    async fn load_to<S, F>(&self, id: S, f: &mut F) -> Result<u64, Self::Error>
+    async fn load_to<E, F>(&self, id: &Self::Id, f: &mut F) -> Result<u64, Self::Error>
     where
+        E: DeserializeOwned + Send + Sync,
         F: FnMut(E) + Send + Sync,
-        S: AsRef<str> + Send + Sync,
     {
-        if let Some(entries) = self.0.lock().unwrap().get(id.as_ref()) {
+        if let Some(entries) = self.0.lock().unwrap().get(id) {
             let history = entries
                 .iter()
                 .map(|e| serde_json::from_str(e))
@@ -57,11 +56,11 @@ where
         }
     }
 
-    async fn load_history<S>(&self, id: S) -> Result<Vec<E>, Self::Error>
+    async fn load_history<E>(&self, id: &Self::Id) -> Result<Vec<E>, Self::Error>
     where
-        S: AsRef<str> + Send + Sync,
+        E: DeserializeOwned + Send + Sync,
     {
-        if let Some(entries) = self.0.lock().unwrap().get(id.as_ref()) {
+        if let Some(entries) = self.0.lock().unwrap().get(id) {
             let history = entries
                 .iter()
                 .map(|e| serde_json::from_str(e))
@@ -76,19 +75,19 @@ where
         }
     }
 
-    async fn commit<S>(&self, id: S, version: u64, events: &[E]) -> Result<(), Self::Error>
+    async fn commit<E>(&self, id: &Self::Id, version: u64, events: &[E]) -> Result<(), Self::Error>
     where
-        S: AsRef<str> + Send + Sync,
+        E: Serialize + Display + Send + Sync,
     {
         for e in events {
             self.0
                 .lock()
                 .unwrap()
-                .entry(id.as_ref().to_owned())
+                .entry(id.to_owned())
                 .or_insert_with(Vec::new)
                 .push(
                     serde_json::json!(Envelope {
-                        id: id.as_ref(),
+                        id: &id,
                         version,
                         data: e
                     })
@@ -99,25 +98,31 @@ where
     }
 
     /// commit `events` for `id` using "must exist" as optimistic concurrency
-    async fn commit_exists<S>(&self, _id: S, _events: &[E]) -> Result<(), Self::Error>
+    async fn commit_exists<E>(&self, _id: &Self::Id, _events: &[E]) -> Result<(), Self::Error>
     where
-        S: AsRef<str> + Send + Sync,
+        E: Serialize + Display + Send + Sync,
     {
         unimplemented!();
     }
 
     /// commit `events` for `id` using "must not exist" as optimistic concurrency
-    async fn commit_not_exists<S>(&self, _id: S, _events: &[E]) -> Result<(), Self::Error>
+    async fn commit_not_exists<E>(&self, _id: &Self::Id, _events: &[E]) -> Result<(), Self::Error>
     where
-        S: AsRef<str> + Send + Sync,
+        E: Serialize + Display + Send + Sync,
     {
         unimplemented!();
     }
 
-    async fn exists<S>(&self, id: S) -> Result<bool, Self::Error>
-    where
-        S: AsRef<str> + Send + Sync,
-    {
-        Ok(self.0.lock().unwrap().contains_key(id.as_ref()))
+    /// commit `events` for `id` using "must not exist" as optimistic concurrency
+    async fn manual_commit(
+        &self,
+        _id: &Self::Id,
+        _entry: Self::ManualEntry,
+    ) -> Result<(), Self::Error> {
+        unimplemented!();
+    }
+
+    async fn exists(&self, id: &Self::Id) -> Result<bool, Self::Error> {
+        Ok(self.0.lock().unwrap().contains_key(id))
     }
 }

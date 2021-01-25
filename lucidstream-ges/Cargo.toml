@@ -1,6 +1,6 @@
 [package]
 name = "lucidstream-ges"
-version = "0.7.1"
+version = "0.7.2"
 authors = ["Denis Tsai <dt665m@gmail.com>"]
 edition = "2018"
 license = "MIT"

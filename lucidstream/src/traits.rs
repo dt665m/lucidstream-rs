@@ -34,7 +34,12 @@ pub trait EventStore {
 
     /// load events based on `kind` and `id` and applys it into `f` callback.  Returns the total
     /// count loaded  
-    async fn load_to<E, F>(&self, id: &Self::Id, f: &mut F) -> Result<u64, Self::Error>
+    async fn load_to<E, F>(
+        &self,
+        id: &Self::Id,
+        start_position: u64,
+        f: &mut F,
+    ) -> Result<u64, Self::Error>
     where
         E: DeserializeOwned + Send + Sync,
         F: FnMut(E) + Send + Sync;

@@ -44,12 +44,17 @@ async fn test_all() {
     log::info!("====== complete");
 
     let mut ar = AggregateRoot::<Account>::default(id.clone());
+    let start_position = ar.version();
     let mut f = |e| {
         ar.apply(&e);
     };
 
     log::info!("====== testing ... event loading and aggregate rehydration");
-    let _count = repo.inner_ref().load_to(&stream_id, &mut f).await.unwrap();
+    let _count = repo
+        .inner_ref()
+        .load_to(&stream_id, start_position, &mut f)
+        .await
+        .unwrap();
     assert_eq!(ar.id(), &id);
     assert_eq!(ar.state().balance, 5);
     log::info!("{:?} {:?}", _count, ar);

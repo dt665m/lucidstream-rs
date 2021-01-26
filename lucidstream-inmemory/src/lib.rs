@@ -2,6 +2,7 @@ use lucidstream::traits::EventStore as EventStoreT;
 use lucidstream::types::Envelope;
 
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::fmt::Display;
 use std::sync::{Arc, Mutex};
 
@@ -31,10 +32,15 @@ impl Default for MemEventStore {
 #[async_trait]
 impl EventStoreT for MemEventStore {
     type Id = String;
-    type ManualEntry = ();
+    type ManualEntry = bool;
     type Error = Error;
 
-    async fn load_to<E, F>(&self, id: &Self::Id, f: &mut F) -> Result<u64, Self::Error>
+    async fn load_to<E, F>(
+        &self,
+        id: &Self::Id,
+        start_position: u64,
+        f: &mut F,
+    ) -> Result<u64, Self::Error>
     where
         E: DeserializeOwned + Send + Sync,
         F: FnMut(E) + Send + Sync,
@@ -42,6 +48,7 @@ impl EventStoreT for MemEventStore {
         if let Some(entries) = self.0.lock().unwrap().get(id) {
             let history = entries
                 .iter()
+                .skip(start_position.try_into().unwrap())
                 .map(|e| serde_json::from_str(e))
                 .collect::<Result<Vec<Envelope<String, E>>, _>>()
                 .unwrap();

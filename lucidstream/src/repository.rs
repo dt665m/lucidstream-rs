@@ -350,13 +350,14 @@ where
             Some(ref cache) => cache.get(stream_id).await.unwrap_or(state),
             _ => state,
         };
+        let start_position = ar.version();
         let mut f = |e| {
             ar.apply(&e);
         };
 
         let _count = self
             .eventstore
-            .load_to(stream_id, &mut f)
+            .load_to(stream_id, start_position, &mut f)
             .await
             .map_err(|e| Error::EventStore {
                 source: e.into(),

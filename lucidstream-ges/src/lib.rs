@@ -15,7 +15,10 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("EventStore error: `{source}`")]
-    EventStore { source: eventstore::Error },
+    EventStore {
+        #[from]
+        source: eventstore::Error,
+    },
 
     #[error("Wrong expected version")]
     WrongExpectedVersion,
@@ -54,7 +57,7 @@ impl EventStore {
         [kind, "_", id].concat()
     }
 
-    pub fn to_expected_version(aggregate_version: u64) -> Option<u64> {
+    pub fn expected_version(aggregate_version: u64) -> Option<u64> {
         match aggregate_version {
             0 => None,
             n => Some(n - 1),
@@ -68,12 +71,12 @@ impl EventStoreT for EventStore {
     type ManualEntry = ManualEntry;
     type Error = Error;
 
-    async fn load_to<E, F>(&self, id: &Self::Id, f: &mut F) -> Result<u64>
+    async fn load_to<E, F>(&self, id: &Self::Id, start_position: u64, f: &mut F) -> Result<u64>
     where
         E: DeserializeOwned + Send + Sync,
         F: FnMut(E) + Send + Sync,
     {
-        load_all_events::<E, _>(&self.inner, id, self.batch_count, f).await
+        load_all_events::<E, _>(&self.inner, id, start_position, self.batch_count, f).await
     }
 
     async fn load_history<E>(&self, id: &Self::Id) -> Result<Vec<E>>
@@ -84,7 +87,7 @@ impl EventStoreT for EventStore {
         let mut f = |e| {
             history.push(e);
         };
-        let _ = load_all_events::<E, _>(&self.inner, id, self.batch_count, &mut f).await?;
+        let _ = load_all_events::<E, _>(&self.inner, id, 0, self.batch_count, &mut f).await?;
         Ok(history)
     }
 
@@ -125,8 +128,7 @@ impl EventStoreT for EventStore {
             .write_events(id)
             .expected_version(version.map_or(ExpectedVersion::NoStream, ExpectedVersion::Exact))
             .send(stream::iter(events))
-            .await
-            .map_err(|e| Error::EventStore { source: e.into() })?;
+            .await?;
 
         log::debug!("write result: {:?}", write_result);
         write_result
@@ -140,8 +142,7 @@ impl EventStoreT for EventStore {
             .read_stream(id)
             .start_from_beginning()
             .execute(1)
-            .await
-            .map_err(|e| Error::EventStore { source: e.into() })?;
+            .await?;
 
         match res {
             ReadResult::Ok(_) => Ok(true),
@@ -168,8 +169,7 @@ where
         .write_events(stream_id)
         .expected_version(expected_version)
         .send(stream::iter(event_datum))
-        .await
-        .map_err(|e| Error::EventStore { source: e.into() })?;
+        .await?;
 
     log::debug!("write result: {:?}", write_result);
     write_result
@@ -180,6 +180,7 @@ where
 async fn load_all_events<E, F>(
     conn: &Client,
     stream_id: &str,
+    start_position: u64,
     batch_count: u64,
     f: &mut F,
 ) -> Result<u64>
@@ -187,7 +188,7 @@ where
     E: DeserializeOwned,
     F: FnMut(E),
 {
-    let mut position = 0;
+    let mut position = start_position;
     loop {
         let count = load_events::<E, _>(conn, stream_id, position, batch_count, f).await?;
 
@@ -225,16 +226,11 @@ where
         .read_stream(stream_id.to_owned())
         .start_from(start_position)
         .execute(load_count)
-        .await
-        .map_err(|e| Error::EventStore { source: e.into() })?;
+        .await?;
 
     let mut count = 0;
     if let ReadResult::Ok(mut stream) = res {
-        while let Some(event) = stream
-            .try_next()
-            .await
-            .map_err(|e| Error::EventStore { source: e.into() })?
-        {
+        while let Some(event) = stream.try_next().await? {
             let event = event.get_original_event();
             let payload: E = event.as_json()?;
             count += 1;

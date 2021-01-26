@@ -37,8 +37,8 @@ impl Retryable for Error {
 }
 
 pub struct ManualEntry {
-    version: Option<u64>,
-    events: Vec<EventData>,
+    pub version: Option<u64>,
+    pub events: Vec<EventData>,
 }
 
 impl EventStore {

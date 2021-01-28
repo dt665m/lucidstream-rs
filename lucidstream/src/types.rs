@@ -8,7 +8,6 @@ pub struct AggregateRoot<T: Aggregate> {
 
     version: u64,
 
-    #[serde(flatten)]
     state: T,
 
     #[serde(skip_serializing)]

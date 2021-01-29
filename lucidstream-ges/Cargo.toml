@@ -12,7 +12,7 @@ lucidstream = { path = "../lucidstream" }
 
 log = "0.4"
 # eventstore = "0.9.9"
-eventstore = { git = "https://github.com/dt665m/EventStoreDB-Client-Rust", rev = "8ef4fce850252ac68fc78ffdb716036513a7ed10" } 
+eventstore = { git = "https://github.com/EventStore/EventStoreDB-Client-Rust", rev = "139a4eb274724797a5b22ed25caaefa8d22ad17b" } 
 async-trait = "0.1"
 thiserror = "1"
 futures = "0.3"

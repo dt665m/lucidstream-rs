@@ -1,7 +1,10 @@
 use std::fmt::Display;
 
 use async_trait::async_trait;
-use eventstore::{Client, EventData, ExpectedVersion, ReadResult};
+use eventstore::{
+    AppendToStreamOptions, Client, EventData, ExpectedRevision, ReadResult, ReadStreamOptions,
+    Single, StreamPosition,
+};
 use futures::prelude::*;
 use lucidstream::traits::{EventStore as EventStoreT, Retryable};
 use serde::{de::DeserializeOwned, Serialize};
@@ -97,7 +100,13 @@ impl EventStoreT for EventStore {
     {
         // eventstore event index starts at 0.  We use u64 for aggregate starting at 1 for the
         // first event, so the -1 is required to align with the store
-        commit(&self.inner, id, events, ExpectedVersion::Exact(version - 1)).await
+        commit(
+            &self.inner,
+            id,
+            events,
+            ExpectedRevision::Exact(version - 1),
+        )
+        .await
     }
 
     /// commit `events` for `id` using "must exist" as optimistic concurrency
@@ -105,7 +114,7 @@ impl EventStoreT for EventStore {
     where
         E: Serialize + Display + Send + Sync,
     {
-        commit(&self.inner, id, events, ExpectedVersion::StreamExists).await
+        commit(&self.inner, id, events, ExpectedRevision::StreamExists).await
     }
 
     /// commit `events` for `id` using "must not exist" as optimistic concurrency
@@ -113,7 +122,7 @@ impl EventStoreT for EventStore {
     where
         E: Serialize + Display + Send + Sync,
     {
-        commit(&self.inner, id, events, ExpectedVersion::NoStream).await
+        commit(&self.inner, id, events, ExpectedRevision::NoStream).await
     }
 
     /// commit `events` for `kind` and `id` using "must not exist" as optimistic concurrency
@@ -123,12 +132,9 @@ impl EventStoreT for EventStore {
         entry: Self::ManualEntry,
     ) -> Result<(), Self::Error> {
         let ManualEntry { version, events } = entry;
-        let write_result = self
-            .inner
-            .write_events(id)
-            .expected_version(version.map_or(ExpectedVersion::NoStream, ExpectedVersion::Exact))
-            .send(stream::iter(events))
-            .await?;
+        let opts = AppendToStreamOptions::default()
+            .expected_revision(version.map_or(ExpectedRevision::NoStream, ExpectedRevision::Exact));
+        let write_result = self.inner.append_to_stream(id, &opts, events).await?;
 
         log::debug!("write result: {:?}", write_result);
         write_result
@@ -137,14 +143,11 @@ impl EventStoreT for EventStore {
     }
 
     async fn exists(&self, id: &Self::Id) -> Result<bool> {
-        let res = self
+        match self
             .inner
-            .read_stream(id)
-            .start_from_beginning()
-            .execute(1)
-            .await?;
-
-        match res {
+            .read_stream(id, &Default::default(), Single)
+            .await?
+        {
             ReadResult::Ok(_) => Ok(true),
             _ => Ok(false),
         }
@@ -155,7 +158,7 @@ async fn commit<E>(
     conn: &Client,
     stream_id: &str,
     events: &[E],
-    expected_version: ExpectedVersion,
+    expected_revision: ExpectedRevision,
 ) -> Result<()>
 where
     E: Serialize + Display,
@@ -165,11 +168,8 @@ where
         .map(|e| EventData::json(e.to_string(), e))
         .collect::<std::result::Result<Vec<EventData>, _>>()?;
 
-    let write_result = conn
-        .write_events(stream_id)
-        .expected_version(expected_version)
-        .send(stream::iter(event_datum))
-        .await?;
+    let opts = AppendToStreamOptions::default().expected_revision(expected_revision);
+    let write_result = conn.append_to_stream(stream_id, &opts, event_datum).await?;
 
     log::debug!("write result: {:?}", write_result);
     write_result
@@ -222,10 +222,9 @@ where
     F: FnMut(E),
 {
     log::debug!("loading events from {:?}", start_position);
+    let opts = ReadStreamOptions::default().position(StreamPosition::Point(start_position));
     let res = conn
-        .read_stream(stream_id.to_owned())
-        .start_from(start_position)
-        .execute(load_count)
+        .read_stream(&stream_id, &opts, load_count as usize)
         .await?;
 
     let mut count = 0;

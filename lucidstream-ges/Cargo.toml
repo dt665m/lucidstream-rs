@@ -11,8 +11,8 @@ description = "Lucidstream eventstore implementation for www.eventstore.com"
 lucidstream = { path = "../lucidstream" }
 
 log = "0.4"
-# eventstore = "0.9.9"
-eventstore = { git = "https://github.com/EventStore/EventStoreDB-Client-Rust", rev = "139a4eb274724797a5b22ed25caaefa8d22ad17b" } 
+eventstore = "1.0.0"
+#eventstore = { git = "https://github.com/EventStore/EventStoreDB-Client-Rust", rev = "139a4eb274724797a5b22ed25caaefa8d22ad17b" } 
 async-trait = "0.1"
 thiserror = "1"
 futures = "0.3"

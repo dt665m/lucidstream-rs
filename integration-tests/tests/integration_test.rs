@@ -1,8 +1,6 @@
 use std::fmt::{self, Display};
 
-use lucidstream::repository::Repository;
-use lucidstream::traits::{Aggregate, EventStore as EventStoreT};
-use lucidstream::types::*;
+use lucidstream::prelude::*;
 use lucidstream_ges::includes::eventstore::Client;
 use lucidstream_ges::EventStore;
 use serde::{Deserialize, Serialize};
@@ -26,7 +24,7 @@ async fn test_all() {
     log::info!("TEST_ALL");
     let conn = connect_ges().await;
     let es = EventStore::new(conn.clone(), 5);
-    let repo = Repository::<_, ()>::new(es);
+    let repo = Repo::new(es);
     let id = "123456".to_string();
     let stream_id = EventStore::stream_id(Account::kind(), &id);
 
@@ -68,7 +66,7 @@ async fn benchmark() {
 
     let conn = connect_ges().await;
     let es = EventStore::new(conn.clone(), 5);
-    let repo = std::sync::Arc::new(Repository::<_, ()>::new(es));
+    let repo = std::sync::Arc::new(Repo::new(es));
 
     let id = "654321".to_string();
     let stream_id = EventStore::stream_id(Account::kind(), &id);

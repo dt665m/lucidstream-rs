@@ -5,7 +5,7 @@ networks:
 
 services:
     eventstore:
-        image: eventstore/eventstore:20.6.1-buster-slim
+        image: eventstore/eventstore:20.10.0-buster-slim
         container_name: eventstore
         environment:
             EVENTSTORE_DISABLE_HTTP_CACHING: 'true'

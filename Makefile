@@ -21,11 +21,13 @@ untag:
 ###########################################################
 ### Integration Tests
 
-it-ges: local-es 
+it-ges: local-es it-run local-down
+
+it-run: 
 	cd ${ROOT_DIR}/integration-tests ; \
 	RUST_BACKTRACE=1 RUST_LOG=debug cargo test test_all -- --nocapture
 
-it-ges-benchmark: local-es 
+it-ges-bench: local-es 
 	cd ${ROOT_DIR}/integration-tests ; \
 	RUST_BACKTRACE=1 RUST_LOG='integration_test=debug,malory=debug' cargo test --release benchmark -- --nocapture
 

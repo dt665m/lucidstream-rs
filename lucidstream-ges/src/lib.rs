@@ -43,7 +43,7 @@ impl Retryable for Error {
 }
 
 pub struct ManualEntry {
-    pub version: Option<u64>,
+    pub expected_revision: ExpectedRevision,
     pub events: Vec<EventData>,
 }
 
@@ -131,9 +131,11 @@ impl EventStoreT for EventStore {
         id: &Self::Id,
         entry: Self::ManualEntry,
     ) -> Result<(), Self::Error> {
-        let ManualEntry { version, events } = entry;
-        let opts = AppendToStreamOptions::default()
-            .expected_revision(version.map_or(ExpectedRevision::NoStream, ExpectedRevision::Exact));
+        let ManualEntry {
+            expected_revision,
+            events,
+        } = entry;
+        let opts = AppendToStreamOptions::default().expected_revision(expected_revision);
         let write_result = self.inner.append_to_stream(id, &opts, events).await?;
 
         log::debug!("write result: {:?}", write_result);

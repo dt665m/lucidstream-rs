@@ -386,7 +386,12 @@ where
         T::Id: Serialize + DeserializeOwned,
         T::Event: Serialize + DeserializeOwned,
     {
-        let state = self.cache.get(stream_id).await.unwrap_or(state);
+        let snapshot_frequency = T::snapshot_frequency();
+        let state = if snapshot_frequency.is_some() {
+            self.cache.get(stream_id).await.unwrap_or(state)
+        } else {
+            state
+        };
         self.inner
             .handle_concurrent(stream_id, state, command)
             .await
@@ -420,10 +425,16 @@ where
         T::Id: Serialize + DeserializeOwned,
         T::Event: Serialize + DeserializeOwned,
     {
-        let state = self.cache.get(stream_id).await.unwrap_or(state);
+        let snapshot_frequency = T::snapshot_frequency();
+        let state = if snapshot_frequency.is_some() {
+            self.cache.get(stream_id).await.unwrap_or(state)
+        } else {
+            state
+        };
         let ar = self.inner.handle_exists(stream_id, state, command).await?;
-        if T::should_snapshot(ar.version()) {
-            self.cache.set(stream_id, &ar).await;
+        match snapshot_frequency {
+            Some(freq) if ar.version() % freq == 0 => self.cache.set(stream_id, &ar).await,
+            _ => (),
         }
         Ok(ar)
     }
@@ -447,8 +458,9 @@ where
             .manual_commit(stream_id, ar, events, entry)
             .await?;
 
-        if T::should_snapshot(ar.version()) {
-            self.cache.set(stream_id, &ar).await;
+        match T::snapshot_frequency() {
+            Some(freq) if ar.version() % freq == 0 => self.cache.set(stream_id, &ar).await,
+            _ => (),
         }
         Ok(ar)
     }

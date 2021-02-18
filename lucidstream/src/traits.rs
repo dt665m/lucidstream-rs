@@ -19,8 +19,8 @@ pub trait Aggregate: Default + Debug + Clone + Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// whether the aggregate should be snapshotted and how frequent
-    fn should_snapshot(_version: u64) -> bool {
-        false
+    fn snapshot_frequency() -> Option<u64> {
+        None
     }
 
     /// aggregate type description

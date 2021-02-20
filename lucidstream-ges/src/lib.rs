@@ -192,7 +192,7 @@ where
 {
     let mut position = start_position;
     loop {
-        let count = load_events::<E, _>(conn, stream_id, position, batch_count, f).await?;
+        let count = load_events::<E, _>(conn, stream_id, position, batch_count as usize, f).await?;
 
         position += count;
         if count == batch_count {
@@ -216,7 +216,7 @@ async fn load_events<E, F>(
     conn: &Client,
     stream_id: &str,
     start_position: u64,
-    load_count: u64,
+    load_count: usize,
     f: &mut F,
 ) -> Result<u64>
 where
@@ -225,9 +225,7 @@ where
 {
     log::debug!("loading events from {:?}", start_position);
     let opts = ReadStreamOptions::default().position(StreamPosition::Point(start_position));
-    let res = conn
-        .read_stream(&stream_id, &opts, load_count as usize)
-        .await?;
+    let res = conn.read_stream(&stream_id, &opts, load_count).await?;
 
     let mut count = 0;
     if let ReadResult::Ok(mut stream) = res {

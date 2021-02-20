@@ -196,7 +196,6 @@ where
 
         position += count;
         if count == batch_count {
-            // completed a whole batch, try more
             log::debug!(
                 "read {:?}, moving on to next batch from {:?} to {:?}",
                 count,
@@ -204,8 +203,7 @@ where
                 batch_count,
             );
         } else {
-            // there isn't anymore to read
-            log::debug!("batch complete, {:?}/{:?}", count, batch_count);
+            log::debug!("batch complete: {:?}/{:?}", count, batch_count);
             break;
         }
     }
@@ -223,7 +221,6 @@ where
     E: DeserializeOwned,
     F: FnMut(E),
 {
-    log::debug!("loading events from {:?}", start_position);
     let opts = ReadStreamOptions::default().position(StreamPosition::Point(start_position));
     let res = conn.read_stream(&stream_id, &opts, load_count).await?;
 
@@ -235,11 +232,14 @@ where
             count += 1;
             f(payload);
 
-            log::debug!("event: {:?}", event.event_type);
-            log::debug!("  stream id: {:?}", event.stream_id);
-            log::debug!("  revision: {:?}", event.revision);
-            log::debug!("  position: {:?}", event.position);
-            log::debug!("  count: {:?}", count);
+            log::debug!(
+                "event: {:?}\n  streamid: {:?}\n  revison: {:?}\n  position: {:?}\n  count: {:?}",
+                event.event_type,
+                event.stream_id,
+                event.revision,
+                event.position,
+                count
+            );
         }
     }
 

@@ -36,6 +36,7 @@ pub trait Aggregate: Default + Debug + Clone + Send + Sync {
 #[async_trait]
 pub trait EventStore: Send + Sync {
     type Id: Send + Sync + 'static;
+    type Metadata: Send + Sync + 'static;
     type ManualEntry: Send + Sync + 'static;
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -49,10 +50,10 @@ pub trait EventStore: Send + Sync {
     ) -> Result<u64, Self::Error>
     where
         E: DeserializeOwned + Send + Sync,
-        F: FnMut(E) + Send + Sync;
+        F: FnMut(E, Self::Metadata) + Send + Sync;
 
     /// load events based on `kind` and `id`.  Returns Vector of Events loaded
-    async fn load_history<E>(&self, id: &Self::Id) -> Result<Vec<E>, Self::Error>
+    async fn load_history<E>(&self, id: &Self::Id) -> Result<Vec<(E, Self::Metadata)>, Self::Error>
     where
         E: DeserializeOwned + Send + Sync,
         E: 'async_trait;

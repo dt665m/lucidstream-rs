@@ -1,9 +1,10 @@
 use std::fmt::Display;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use eventstore::{
     AppendToStreamOptions, Client, EventData, ExpectedRevision, ReadResult, ReadStreamOptions,
-    Single, StreamPosition,
+    ResolvedEvent, Single, StreamPosition,
 };
 use futures::prelude::*;
 use lucidstream::traits::{EventStore as EventStoreT, Retryable};
@@ -28,6 +29,9 @@ pub enum Error {
 
     #[error("Serialization error: `{0}`")]
     Serialization(#[from] serde_json::Error),
+
+    #[error("Event missing from Record")]
+    MissingEvent,
 }
 
 #[derive(Clone)]
@@ -71,24 +75,25 @@ impl EventStore {
 #[async_trait]
 impl EventStoreT for EventStore {
     type Id = String;
+    type Metadata = Bytes;
     type ManualEntry = ManualEntry;
     type Error = Error;
 
     async fn load_to<E, F>(&self, id: &Self::Id, start_position: u64, f: &mut F) -> Result<u64>
     where
         E: DeserializeOwned + Send + Sync,
-        F: FnMut(E) + Send + Sync,
+        F: FnMut(E, Self::Metadata) + Send + Sync,
     {
         load_all_events::<E, _>(&self.inner, id, start_position, self.batch_count, f).await
     }
 
-    async fn load_history<E>(&self, id: &Self::Id) -> Result<Vec<E>>
+    async fn load_history<E>(&self, id: &Self::Id) -> Result<Vec<(E, Self::Metadata)>>
     where
         E: DeserializeOwned + Send + Sync,
     {
         let mut history = vec![];
-        let mut f = |e| {
-            history.push(e);
+        let mut f = |e, metadata| {
+            history.push((e, metadata));
         };
         let _ = load_all_events::<E, _>(&self.inner, id, 0, self.batch_count, &mut f).await?;
         Ok(history)
@@ -188,7 +193,7 @@ async fn load_all_events<E, F>(
 ) -> Result<u64>
 where
     E: DeserializeOwned,
-    F: FnMut(E),
+    F: FnMut(E, Bytes),
 {
     let mut position = start_position;
     loop {
@@ -219,18 +224,17 @@ async fn load_events<E, F>(
 ) -> Result<u64>
 where
     E: DeserializeOwned,
-    F: FnMut(E),
+    F: FnMut(E, Bytes),
 {
     let opts = ReadStreamOptions::default().position(StreamPosition::Point(start_position));
     let res = conn.read_stream(&stream_id, &opts, load_count).await?;
 
     let mut count = 0;
     if let ReadResult::Ok(mut stream) = res {
-        while let Some(event) = stream.try_next().await? {
-            let event = event.get_original_event();
-            let payload: E = event.as_json()?;
+        while let Some(resolved) = stream.try_next().await? {
+            let ResolvedEvent { event, .. } = resolved;
+            let event = event.ok_or(Error::MissingEvent)?;
             count += 1;
-            f(payload);
 
             log::debug!(
                 "event: {:?}\n  streamid: {:?}\n  revison: {:?}\n  position: {:?}\n  count: {:?}",
@@ -240,6 +244,7 @@ where
                 event.position,
                 count
             );
+            f(event.as_json()?, event.custom_metadata);
         }
     }
 

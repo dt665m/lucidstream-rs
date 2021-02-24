@@ -277,7 +277,7 @@ where
     {
         let mut ar = state;
         let start_position = ar.version();
-        let mut f = |e| {
+        let mut f = |e, _| {
             ar.apply(&e);
         };
 

@@ -32,6 +32,7 @@ impl Default for MemEventStore {
 #[async_trait]
 impl EventStoreT for MemEventStore {
     type Id = String;
+    type Metadata = ();
     type ManualEntry = bool;
     type Error = Error;
 
@@ -43,7 +44,7 @@ impl EventStoreT for MemEventStore {
     ) -> Result<u64, Self::Error>
     where
         E: DeserializeOwned + Send + Sync,
-        F: FnMut(E) + Send + Sync,
+        F: FnMut(E, Self::Metadata) + Send + Sync,
     {
         if let Some(entries) = self.0.lock().unwrap().get(id) {
             let history = entries
@@ -55,7 +56,7 @@ impl EventStoreT for MemEventStore {
             let len = history.len();
             history.into_iter().for_each(|e| {
                 let inner = e.into_inner();
-                f(inner);
+                f(inner, ());
             });
             Ok(len as u64)
         } else {
@@ -63,7 +64,7 @@ impl EventStoreT for MemEventStore {
         }
     }
 
-    async fn load_history<E>(&self, id: &Self::Id) -> Result<Vec<E>, Self::Error>
+    async fn load_history<E>(&self, id: &Self::Id) -> Result<Vec<(E, Self::Metadata)>, Self::Error>
     where
         E: DeserializeOwned + Send + Sync,
     {
@@ -74,8 +75,8 @@ impl EventStoreT for MemEventStore {
                 .collect::<Result<Vec<Envelope<String, E>>, _>>()
                 .unwrap()
                 .into_iter()
-                .map(|e| e.into_inner())
-                .collect::<Vec<E>>();
+                .map(|e| (e.into_inner(), ()))
+                .collect::<Vec<(E, Self::Metadata)>>();
             Ok(history)
         } else {
             Ok(vec![])

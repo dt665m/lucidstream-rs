@@ -2,7 +2,7 @@ use crate::traits::{Aggregate, EventStore, Repository, Retryable, SnapshotStore}
 use crate::types::AggregateRoot;
 use crate::utils::retry_future;
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
@@ -60,20 +60,19 @@ where
 {
     type Error = Error;
 
-    async fn handle<T>(
+    async fn handle<T, I>(
         &self,
         stream_id: &E::Id,
-        id: T::Id,
+        id: I,
         command: T::Command,
         retry_count: usize,
     ) -> Result<AggregateRoot<T>, Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
-        T::Error: std::error::Error + Send + 'static,
+        I: Display,
+        I: Display + Send + Sync,
     {
-        let state = AggregateRoot::default(id);
+        let state = AggregateRoot::new(id);
         retry_future(
             || self.handle_concurrent(stream_id, state.clone(), command.clone()),
             concurrency_retryable,
@@ -82,7 +81,7 @@ where
         .await
     }
 
-    async fn handle_with_init<T>(
+    async fn handle_with<T>(
         &self,
         stream_id: &E::Id,
         state: AggregateRoot<T>,
@@ -91,9 +90,6 @@ where
     ) -> Result<AggregateRoot<T>, Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
-        T::Error: std::error::Error + Send + 'static,
     {
         retry_future(
             || self.handle_concurrent(stream_id, state.clone(), command.clone()),
@@ -111,18 +107,17 @@ where
     ) -> Result<AggregateRoot<T>, Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
     {
-        let mut ar = self
-            .dry_run_with_init(stream_id, state, command, false)
-            .await?;
+        let mut ar = self.dry_run(stream_id, state, command, false).await?;
         let changes = ar.take_changes();
 
-        let ar = self
-            .eventstore
+        self.eventstore
             .commit(stream_id, ar.version(), &changes)
             .await
+            .map(|_| {
+                ar.apply(changes);
+                ar
+            })
             .map_err(|e| {
                 let retryable = e.retryable();
                 Error::EventStore {
@@ -130,12 +125,6 @@ where
                     retryable,
                 }
             })
-            .map(|_| {
-                ar.apply_iter(changes);
-                ar
-            })?;
-
-        Ok(ar)
     }
 
     async fn handle_not_exists<T>(
@@ -143,12 +132,9 @@ where
         stream_id: &E::Id,
         state: AggregateRoot<T>,
         command: T::Command,
-    ) -> Result<AggregateRoot<T>, Error>
+    ) -> Result<AggregateRoot<T>, Self::Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
-        T::Error: std::error::Error + Send + 'static,
     {
         // we don't need incur a load from the event store because the commit
         // will guarantee that this aggregate id does not exist / has no events
@@ -161,16 +147,16 @@ where
         self.eventstore
             .commit_not_exists(stream_id, &changes)
             .await
+            .map(|_| {
+                ar.apply(changes);
+                ar
+            })
             .map_err(|e| {
                 let retryable = e.retryable();
                 Error::EventStore {
                     source: e.into(),
                     retryable,
                 }
-            })
-            .map(|_| {
-                ar.apply_iter(changes);
-                ar
             })
     }
 
@@ -179,21 +165,20 @@ where
         stream_id: &E::Id,
         state: AggregateRoot<T>,
         command: T::Command,
-    ) -> Result<AggregateRoot<T>, Error>
+    ) -> Result<AggregateRoot<T>, Self::Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
     {
-        let mut ar = self
-            .dry_run_with_init(stream_id, state, command, false)
-            .await?;
+        let mut ar = self.dry_run(stream_id, state, command, false).await?;
         let changes = ar.take_changes();
 
-        let ar = self
-            .eventstore
+        self.eventstore
             .commit_exists(stream_id, &changes)
             .await
+            .map(|_| {
+                ar.apply(changes);
+                ar
+            })
             .map_err(|e| {
                 let retryable = e.retryable();
                 Error::EventStore {
@@ -201,27 +186,17 @@ where
                     retryable,
                 }
             })
-            .map(|_| {
-                ar.apply_iter(changes);
-                ar
-            })?;
-
-        Ok(ar)
     }
 
     async fn manual_commit<T>(
         &self,
         stream_id: &E::Id,
-        ar: AggregateRoot<T>,
+        mut state: AggregateRoot<T>,
         events: Vec<T::Event>,
         entry: E::ManualEntry,
-    ) -> Result<AggregateRoot<T>, Error>
+    ) -> Result<AggregateRoot<T>, Self::Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
-        E: EventStore<Id = String>,
-        E::Error: Retryable,
     {
         self.eventstore
             .manual_commit(stream_id, entry)
@@ -234,36 +209,11 @@ where
                 }
             })?;
 
-        let ar = events.iter().fold(ar, |mut ar, e| {
-            ar.apply(e);
-            ar
-        });
-        Ok(ar)
+        state.apply(events);
+        Ok(state)
     }
 
     async fn dry_run<T>(
-        &self,
-        stream_id: &E::Id,
-        id: T::Id,
-        command: T::Command,
-        allow_unknown: bool,
-    ) -> Result<AggregateRoot<T>, Error>
-    where
-        T: Aggregate + DeserializeOwned,
-        T::Id: DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
-        E: EventStore<Id = String>,
-    {
-        self.dry_run_with_init(
-            stream_id,
-            AggregateRoot::default(id),
-            command,
-            allow_unknown,
-        )
-        .await
-    }
-
-    async fn dry_run_with_init<T>(
         &self,
         stream_id: &E::Id,
         state: AggregateRoot<T>,
@@ -271,14 +221,12 @@ where
         allow_unknown: bool,
     ) -> Result<AggregateRoot<T>, Error>
     where
-        T: Aggregate + DeserializeOwned,
-        T::Id: DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
+        T: Aggregate + Serialize + DeserializeOwned,
     {
         let mut ar = state;
         let start_position = ar.version();
         let mut f = |e, _| {
-            ar.apply(&e);
+            ar.apply(std::iter::once(e));
         };
 
         let _count = self
@@ -332,20 +280,18 @@ where
 {
     type Error = Error;
 
-    async fn handle<T>(
+    async fn handle<T, I>(
         &self,
         stream_id: &E::Id,
-        id: T::Id,
+        id: I,
         command: T::Command,
         retry_count: usize,
-    ) -> Result<AggregateRoot<T>, Error>
+    ) -> Result<AggregateRoot<T>, Self::Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
-        T::Error: std::error::Error + Send + 'static,
+        I: Display + Send + Sync,
     {
-        let state = AggregateRoot::default(id);
+        let state = AggregateRoot::new(id);
         retry_future(
             || self.handle_concurrent(stream_id, state.clone(), command.clone()),
             concurrency_retryable,
@@ -354,18 +300,15 @@ where
         .await
     }
 
-    async fn handle_with_init<T>(
+    async fn handle_with<T>(
         &self,
         stream_id: &E::Id,
         state: AggregateRoot<T>,
         command: T::Command,
         retry_count: usize,
-    ) -> Result<AggregateRoot<T>, Error>
+    ) -> Result<AggregateRoot<T>, Self::Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
-        T::Error: std::error::Error + Send + 'static,
     {
         retry_future(
             || self.handle_concurrent(stream_id, state.clone(), command.clone()),
@@ -380,21 +323,25 @@ where
         stream_id: &E::Id,
         state: AggregateRoot<T>,
         command: T::Command,
-    ) -> Result<AggregateRoot<T>, Error>
+    ) -> Result<AggregateRoot<T>, Self::Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
     {
-        let snapshot_frequency = T::snapshot_frequency();
-        let state = if snapshot_frequency.is_some() {
-            self.cache.get(stream_id).await.unwrap_or(state)
+        if let Some(freq) = T::snapshot_frequency() {
+            let state = self.cache.get(stream_id).await.unwrap_or(state);
+            let ar = self
+                .inner
+                .handle_concurrent(stream_id, state, command)
+                .await?;
+            if ar.version() % freq == 0 {
+                self.cache.set(stream_id, &ar).await;
+            }
+            Ok(ar)
         } else {
-            state
-        };
-        self.inner
-            .handle_concurrent(stream_id, state, command)
-            .await
+            self.inner
+                .handle_concurrent(stream_id, state, command)
+                .await
+        }
     }
 
     async fn handle_not_exists<T>(
@@ -402,12 +349,9 @@ where
         stream_id: &E::Id,
         state: AggregateRoot<T>,
         command: T::Command,
-    ) -> Result<AggregateRoot<T>, Error>
+    ) -> Result<AggregateRoot<T>, Self::Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
-        T::Error: std::error::Error + Send + 'static,
     {
         self.inner
             .handle_not_exists(stream_id, state, command)
@@ -419,43 +363,35 @@ where
         stream_id: &E::Id,
         state: AggregateRoot<T>,
         command: T::Command,
-    ) -> Result<AggregateRoot<T>, Error>
+    ) -> Result<AggregateRoot<T>, Self::Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
     {
-        let snapshot_frequency = T::snapshot_frequency();
-        let state = if snapshot_frequency.is_some() {
-            self.cache.get(stream_id).await.unwrap_or(state)
+        if let Some(freq) = T::snapshot_frequency() {
+            let state = self.cache.get(stream_id).await.unwrap_or(state);
+            let ar = self.inner.handle_exists(stream_id, state, command).await?;
+            if ar.version() % freq == 0 {
+                self.cache.set(stream_id, &ar).await;
+            }
+            Ok(ar)
         } else {
-            state
-        };
-        let ar = self.inner.handle_exists(stream_id, state, command).await?;
-        match snapshot_frequency {
-            Some(freq) if ar.version() % freq == 0 => self.cache.set(stream_id, &ar).await,
-            _ => (),
+            self.inner.handle_exists(stream_id, state, command).await
         }
-        Ok(ar)
     }
 
     async fn manual_commit<T>(
         &self,
         stream_id: &E::Id,
-        ar: AggregateRoot<T>,
+        state: AggregateRoot<T>,
         events: Vec<T::Event>,
         entry: E::ManualEntry,
-    ) -> Result<AggregateRoot<T>, Error>
+    ) -> Result<AggregateRoot<T>, Self::Error>
     where
         T: Aggregate + Serialize + DeserializeOwned,
-        T::Id: Serialize + DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
-        E: EventStore<Id = String>,
-        E::Error: Retryable,
     {
         let ar = self
             .inner
-            .manual_commit(stream_id, ar, events, entry)
+            .manual_commit(stream_id, state, events, entry)
             .await?;
 
         match T::snapshot_frequency() {
@@ -468,40 +404,15 @@ where
     async fn dry_run<T>(
         &self,
         stream_id: &E::Id,
-        id: T::Id,
-        command: T::Command,
-        allow_unknown: bool,
-    ) -> Result<AggregateRoot<T>, Error>
-    where
-        T: Aggregate + DeserializeOwned,
-        T::Id: DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
-        E: EventStore<Id = String>,
-    {
-        self.inner
-            .dry_run_with_init(
-                stream_id,
-                AggregateRoot::default(id),
-                command,
-                allow_unknown,
-            )
-            .await
-    }
-
-    async fn dry_run_with_init<T>(
-        &self,
-        stream_id: &E::Id,
         state: AggregateRoot<T>,
         command: T::Command,
         allow_unknown: bool,
     ) -> Result<AggregateRoot<T>, Error>
     where
-        T: Aggregate + DeserializeOwned,
-        T::Id: DeserializeOwned,
-        T::Event: Serialize + DeserializeOwned,
+        T: Aggregate + Serialize + DeserializeOwned,
     {
         self.inner
-            .dry_run_with_init(stream_id, state, command, allow_unknown)
+            .dry_run(stream_id, state, command, allow_unknown)
             .await
     }
 }

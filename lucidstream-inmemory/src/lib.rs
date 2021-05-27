@@ -51,7 +51,7 @@ impl EventStoreT for MemEventStore {
                 .iter()
                 .skip(start_position.try_into().unwrap())
                 .map(|e| serde_json::from_str(e))
-                .collect::<Result<Vec<Envelope<String, E>>, _>>()
+                .collect::<Result<Vec<Envelope<E>>, _>>()
                 .unwrap();
             let len = history.len();
             history.into_iter().for_each(|e| {
@@ -72,7 +72,7 @@ impl EventStoreT for MemEventStore {
             let history = entries
                 .iter()
                 .map(|e| serde_json::from_str(e))
-                .collect::<Result<Vec<Envelope<String, E>>, _>>()
+                .collect::<Result<Vec<Envelope<E>>, _>>()
                 .unwrap()
                 .into_iter()
                 .map(|e| (e.into_inner(), ()))
@@ -95,7 +95,7 @@ impl EventStoreT for MemEventStore {
                 .or_insert_with(Vec::new)
                 .push(
                     serde_json::json!(Envelope {
-                        id: &id,
+                        id: id.to_owned(),
                         version,
                         data: e
                     })

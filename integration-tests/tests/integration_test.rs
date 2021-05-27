@@ -26,25 +26,25 @@ async fn test_all() {
     let es = EventStore::new(conn.clone(), 5);
     let repo = Repo::new(es);
     let id = "123456".to_string();
-    let stream_id = EventStore::stream_id(Account::kind(), &id);
+    let stream_id = [Account::kind(), ":", &id].concat();
 
     log::info!("====== testing ... commands");
-    let state = AggregateRoot::<Account>::default(id.clone());
-    repo.handle_not_exists::<Account>(&stream_id, state.clone(), Command::Credit { value: 5 })
+    let state = AccountAR::new(id.clone());
+    repo.handle_not_exists(&stream_id, state.clone(), Command::Credit { value: 5 })
         .await
         .unwrap();
-    repo.handle::<Account>(&stream_id, id.clone(), Command::Credit { value: 5 }, 2)
+    repo.handle_with(&stream_id, state.clone(), Command::Credit { value: 5 }, 2)
         .await
         .unwrap();
-    repo.handle::<Account>(&stream_id, id.clone(), Command::Debit { value: 5 }, 2)
+    repo.handle_with(&stream_id, state.clone(), Command::Debit { value: 5 }, 2)
         .await
         .unwrap();
     log::info!("====== complete");
 
-    let mut ar = AggregateRoot::<Account>::default(id.clone());
+    let mut ar = AccountAR::new(id.clone());
     let start_position = ar.version();
     let mut f = |e, _| {
-        ar.apply(&e);
+        ar.apply(std::iter::once(e));
     };
 
     log::info!("====== testing ... event loading and aggregate rehydration");
@@ -69,17 +69,17 @@ async fn benchmark() {
     let repo = std::sync::Arc::new(Repo::new(es));
 
     let id = "654321".to_string();
-    let stream_id = EventStore::stream_id(Account::kind(), &id);
-    let state = AggregateRoot::default(id);
-    repo.handle_not_exists::<Account>(&stream_id, state, Command::Credit { value: 5 })
+    let stream_id = [Account::kind(), ":", &id].concat();
+    let state = AccountAR::new(id);
+    repo.handle_not_exists(&stream_id, state, Command::Credit { value: 5 })
         .await
         .unwrap();
 
     malory::judge_me(10000, 5, repo.clone(), move |r, _i| async move {
         let id = "654321".to_string();
-        let stream_id = EventStore::stream_id(Account::kind(), &id);
-        let state = AggregateRoot::default(id);
-        r.handle_exists::<Account>(&stream_id, state, Command::Credit { value: 5 })
+        let stream_id = [Account::kind(), ":", &id].concat();
+        let state = AccountAR::new(id);
+        r.handle_exists(&stream_id, state, Command::Credit { value: 5 })
             .await
             .unwrap();
         true
@@ -100,7 +100,7 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum Command {
     Create { owner: String, balance: i64 },
     Debit { value: i64 },
@@ -121,7 +121,7 @@ impl Display for Command {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub enum Event {
     Created { owner: String },
     Credited { value: i64 },
@@ -142,6 +142,8 @@ impl Display for Event {
     }
 }
 
+type AccountAR = AggregateRoot<Account>;
+
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Account {
     pub owner: String,
@@ -150,7 +152,6 @@ pub struct Account {
 }
 
 impl Aggregate for Account {
-    type Id = String;
     type Command = Command;
     type Event = Event;
     type Error = Error;

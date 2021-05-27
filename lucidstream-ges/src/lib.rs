@@ -60,10 +60,6 @@ impl EventStore {
         &self.inner
     }
 
-    pub fn stream_id(kind: &str, id: &str) -> String {
-        [kind, "_", id].concat()
-    }
-
     pub fn expected_version(aggregate_version: u64) -> Option<u64> {
         match aggregate_version {
             0 => None,

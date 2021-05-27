@@ -1,10 +1,11 @@
 use crate::traits::Aggregate;
 
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AggregateRoot<T: Aggregate> {
-    id: T::Id,
+    id: String,
 
     version: u64,
 
@@ -15,33 +16,30 @@ pub struct AggregateRoot<T: Aggregate> {
     changes: Vec<T::Event>,
 }
 
-impl<T: Aggregate> AggregateRoot<T>
-where
-    T::Error: std::error::Error,
-{
-    pub fn new(id: T::Id, state: T, version: u64) -> Self {
+impl<T: Aggregate> AggregateRoot<T> {
+    pub fn new_with<I: Display>(id: I, state: T, version: u64) -> Self {
         Self {
-            id,
+            id: id.to_string(),
             state,
             version,
             changes: vec![],
         }
     }
 
-    pub fn default(id: T::Id) -> Self {
-        AggregateRoot::<T>::new(id, T::default(), 0)
+    pub fn new<I: Display>(id: I) -> Self {
+        Self::new_with(id, T::default(), 0)
     }
 
-    pub fn id(&self) -> &T::Id {
+    pub fn id(&self) -> &str {
         &self.id
-    }
-
-    pub fn version(&self) -> u64 {
-        self.version
     }
 
     pub fn state(&self) -> &T {
         &self.state
+    }
+
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     // returning &mut Self is a little questionable.  It allows callers to not repeatedly reset the
@@ -62,14 +60,7 @@ where
         std::mem::take(&mut self.changes)
     }
 
-    pub fn apply(&mut self, event: &T::Event) -> &mut Self {
-        let state = std::mem::take(&mut self.state);
-        self.state = T::apply(state, event);
-        self.version += 1;
-        self
-    }
-
-    pub fn apply_iter<I>(&mut self, events: I) -> &mut Self
+    pub fn apply<I>(&mut self, events: I) -> &mut Self
     where
         I: IntoIterator<Item = T::Event>,
     {
@@ -85,22 +76,22 @@ where
 /// Envelope structure for DTO's that may need the Id and Version of an aggregate.  Can be used to
 /// encapsulate events or aggregates before serialization
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Envelope<T, U> {
-    pub id: T,
+pub struct Envelope<T> {
+    pub id: String,
     pub version: u64,
     #[serde(flatten)]
-    pub data: U,
+    pub data: T,
 }
 
-impl<T, U> Envelope<T, U> {
-    pub fn into_inner(self) -> U {
+impl<T> Envelope<T> {
+    pub fn into_inner(self) -> T {
         self.data
     }
 }
 
 /// From implementation for AggregateRoot for convenience
-impl<T: Aggregate> From<AggregateRoot<T>> for Envelope<T::Id, T> {
-    fn from(item: AggregateRoot<T>) -> Envelope<T::Id, T> {
+impl<T: Aggregate> From<AggregateRoot<T>> for Envelope<T> {
+    fn from(item: AggregateRoot<T>) -> Envelope<T> {
         let AggregateRoot {
             id, state, version, ..
         } = item;
@@ -131,7 +122,7 @@ mod test {
 
     impl std::error::Error for Error {}
 
-    #[derive(Clone)]
+    #[derive(Serialize, Deserialize, Clone)]
     pub enum Command {
         Create { owner: String, balance: i64 },
         Debit { value: i64 },
@@ -152,7 +143,7 @@ mod test {
         }
     }
 
-    #[derive(Debug, Eq, PartialEq, Clone, Serialize)]
+    #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
     pub enum Event {
         Created { owner: String },
         Credited { value: i64 },
@@ -173,7 +164,9 @@ mod test {
         }
     }
 
-    #[derive(Default, Clone, Debug)]
+    type AccountAR = AggregateRoot<Account>;
+
+    #[derive(Serialize, Deserialize, Default, Clone, Debug)]
     pub struct Account {
         pub owner: String,
         pub suspended: bool,
@@ -181,7 +174,6 @@ mod test {
     }
 
     impl Aggregate for Account {
-        type Id = String;
         type Command = Command;
         type Event = Event;
         type Error = Error;
@@ -245,8 +237,8 @@ mod test {
         ];
         let ar_version = history.len() as u64;
 
-        let mut ar = AggregateRoot::<Account>::default("abcd1".to_owned());
-        ar.apply_iter(history);
+        let mut ar = AccountAR::new("abcd1".to_owned());
+        ar.apply(history);
 
         assert_eq!(*ar.id(), "abcd1".to_owned());
         assert_eq!(ar.version(), ar_version);
@@ -263,14 +255,14 @@ mod test {
             .iter()
             .enumerate()
             .map(|(count, x)| Envelope {
-                id: ar.id().clone(),
+                id: ar.id().to_owned(),
                 version: current_version + (count + 1) as u64,
                 data: x.clone(),
             })
-            .collect::<Vec<Envelope<_, _>>>();
+            .collect::<Vec<Envelope<_>>>();
 
         assert_eq!(ar.version(), ar_version);
-        ar.apply_iter(changes);
+        ar.apply(changes);
         assert_eq!(ar.version(), ar_version + 1);
 
         assert_eq!(*ar.id(), "abcd1".to_owned());
@@ -281,7 +273,7 @@ mod test {
 
         assert_eq!(
             vec![Envelope {
-                id: ar.id().clone(),
+                id: ar.id().to_owned(),
                 version: current_version + 1,
                 data: Event::Debited { value: 5 }
             }],

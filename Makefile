@@ -6,6 +6,18 @@ REPO := github.com/${ORG}/${PROJECT}
 ROOT_DIR := $(CURDIR)
 SEM_VER := $(shell awk -F' = ' '$$1=="version"{print $$2;exit;}' lucidstream/Cargo.toml)
 
+ES_CONTAINER := eventstore
+ifeq ($(shell uname), Darwin)
+	ifeq ($(shell uname -m), arm64)
+		PLATFORM := aarch64-apple-darwin
+        ES_CONTAINER := eventstore-arm 
+	else ifeq 
+		PLATFORM := x86_64-apple-darwin
+	endif
+else ifeq ($(UNAME), Linux)
+	PLATFORM := x86_64-unknown-linux-gnu
+endif
+
 deps: deps-rust deps-cargo
 
 deps-rust:
@@ -43,9 +55,11 @@ it-ges-bench: local-es
 ###########################################################
 ### Local Deployment
 
+# https://github.com/EventStore/EventStore/pkgs/container/eventstore/7973829?tag=20.6.1-alpha.0.69-arm64v8
+# https://github.com/EventStore/EventStore/pkgs/container/eventstore/11006179?tag=21.10.0-alpha-arm64v8
 local-es:
 	source ${ROOT_DIR}/docker/.env_local; \
-	docker-compose -f ${ROOT_DIR}/docker/docker-compose.yaml up -d eventstore; \
+	docker-compose -f ${ROOT_DIR}/docker/docker-compose.yaml up -d eventstore-arm; \
 	sleep 3
 
 local-down:

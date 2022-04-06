@@ -2,7 +2,7 @@
 
 members = [
   "lucidstream",
-	"lucidstream-derive",
+	# "lucidstream-derive",
   "lucidstream-ges",
   "lucidstream-inmemory",
 

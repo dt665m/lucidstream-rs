@@ -16,3 +16,16 @@ services:
             - 2113:2113
         networks:
             - local
+
+    eventstore-arm:
+        image: ghcr.io/eventstore/eventstore:21.10.0-alpha-arm64v8
+        container_name: eventstore
+        environment:
+            EVENTSTORE_DISABLE_HTTP_CACHING: 'true'
+            EVENTSTORE_INSECURE: 'true'
+            # this is for debugging / Admin UI.  Eventually will get depricated
+            EVENTSTORE_ENABLE_ATOM_PUB_OVER_HTTP: 'true'
+        ports:
+            - 2113:2113
+        networks:
+            - local

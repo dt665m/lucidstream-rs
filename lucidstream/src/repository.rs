@@ -411,6 +411,7 @@ where
     where
         T: Aggregate + Serialize + DeserializeOwned,
     {
+        let state = self.cache.get(stream_id).await.unwrap_or(state);
         self.inner
             .dry_run(stream_id, state, command, allow_unknown)
             .await

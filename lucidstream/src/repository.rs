@@ -333,7 +333,7 @@ where
                 .inner
                 .handle_concurrent(stream_id, state, command)
                 .await?;
-            if ar.version() % freq == 0 {
+            if should_snapshot(ar.version(), freq) {
                 self.cache.set(stream_id, &ar).await;
             }
             Ok(ar)
@@ -370,7 +370,7 @@ where
         if let Some(freq) = T::snapshot_frequency() {
             let state = self.cache.get(stream_id).await.unwrap_or(state);
             let ar = self.inner.handle_exists(stream_id, state, command).await?;
-            if ar.version() % freq == 0 {
+            if should_snapshot(ar.version(), freq) {
                 self.cache.set(stream_id, &ar).await;
             }
             Ok(ar)
@@ -395,7 +395,9 @@ where
             .await?;
 
         match T::snapshot_frequency() {
-            Some(freq) if ar.version() % freq == 0 => self.cache.set(stream_id, &ar).await,
+            Some(freq) if should_snapshot(ar.version(), freq) => {
+                self.cache.set(stream_id, &ar).await
+            }
             _ => (),
         }
         Ok(ar)
@@ -416,4 +418,11 @@ where
             .dry_run(stream_id, state, command, allow_unknown)
             .await
     }
+}
+
+/// This is a safety and optimization function.  If a frequency is set to 1 and an aggregate
+/// "default" with 0 version is passed into the dry-run/manual-commit flow, the cache will be
+/// poisoned
+pub fn should_snapshot(version: u64, freq: u64) -> bool {
+    version > 0 && version % freq == 0
 }

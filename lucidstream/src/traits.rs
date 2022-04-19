@@ -16,6 +16,7 @@ pub trait Aggregate: Default + Debug + Clone + Send + Sync + Sized {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Gets snapshot frequency by event version
+    /// #NOTE A Snapshot frequency of 0 will panic the Snapshot store on cache set.
     fn snapshot_frequency() -> Option<u64> {
         None
     }

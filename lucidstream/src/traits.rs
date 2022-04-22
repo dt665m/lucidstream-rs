@@ -31,43 +31,6 @@ pub trait Aggregate: Default + Debug + Clone + Send + Sync + Sized {
     fn apply(self, event: &Self::Event) -> Self;
 }
 
-pub trait AR: Default + Debug + Clone + Send + Sync + Sized {
-    /// Command
-    type Command: Serialize + DeserializeOwned + Display + Clone + Send + Sync;
-
-    /// Event type
-    type Event: Serialize + DeserializeOwned + Display + Clone + Send + Sync;
-
-    /// Error type
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Gets snapshot frequency by event version
-    fn snapshot_frequency() -> Option<u64> {
-        None
-    }
-
-    /// Kind of aggregate
-    fn kind() -> &'static str;
-}
-
-#[async_trait]
-pub trait Rep<E: EventStore> {
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Handle command using the ```default()``` as initial state AggregateRoot's version as
-    /// optimistic concurrency, retrying ```retry_count``` times
-    async fn handle<T, I>(
-        &self,
-        stream_id: &E::Id,
-        id: I,
-        command: T::Command,
-        retry_count: usize,
-    ) -> Result<AggregateRoot<T>, Self::Error>
-    where
-        T: Aggregate + Serialize + DeserializeOwned,
-        I: Display + Send + Sync;
-}
-
 #[async_trait]
 pub trait Repository<E: EventStore> {
     type Error: std::error::Error + Send + Sync + 'static;

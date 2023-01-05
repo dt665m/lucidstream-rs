@@ -1,6 +1,6 @@
 [package]
 name = "lucidstream"
-version = "0.10.3"
+version = "0.11.0"
 authors = ["Denis Tsai <dt665m@gmail.com>"]
 edition = "2018"
 license = "MIT"

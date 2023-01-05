@@ -44,7 +44,7 @@ async fn test_all() {
     let mut ar = AccountAR::new(id.clone());
     let start_position = ar.version();
     let mut f = |e, _| {
-        ar.apply(std::iter::once(e));
+        ar.apply_single(&e);
     };
 
     log::info!("====== testing ... event loading and aggregate rehydration");

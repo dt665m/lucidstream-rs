@@ -60,14 +60,18 @@ impl<T: Aggregate> AggregateRoot<T> {
         std::mem::take(&mut self.changes)
     }
 
-    pub fn apply<I>(&mut self, events: I) -> &mut Self
-    where
-        I: IntoIterator<Item = T::Event>,
-    {
+    pub fn apply_single(&mut self, event: &T::Event) -> &mut Self {
         let state = std::mem::take(&mut self.state);
-        self.state = events.into_iter().fold(state, |acc, event| {
+        self.version += 1;
+        self.state = T::apply(state, event);
+        self
+    }
+
+    pub fn apply(&mut self, events: &[T::Event]) -> &mut Self {
+        let state = std::mem::take(&mut self.state);
+        self.state = events.iter().fold(state, |acc, event| {
             self.version += 1;
-            T::apply(acc, &event)
+            T::apply(acc, event)
         });
         self
     }
@@ -238,7 +242,7 @@ mod test {
         let ar_version = history.len() as u64;
 
         let mut ar = AccountAR::new("abcd1".to_owned());
-        ar.apply(history);
+        ar.apply(&history);
 
         assert_eq!(*ar.id(), "abcd1".to_owned());
         assert_eq!(ar.version(), ar_version);
@@ -262,7 +266,7 @@ mod test {
             .collect::<Vec<Envelope<_>>>();
 
         assert_eq!(ar.version(), ar_version);
-        ar.apply(changes);
+        ar.apply(&changes);
         assert_eq!(ar.version(), ar_version + 1);
 
         assert_eq!(*ar.id(), "abcd1".to_owned());

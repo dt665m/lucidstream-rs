@@ -115,7 +115,7 @@ where
             .commit(stream_id, ar.version(), &changes)
             .await
             .map(|_| {
-                ar.apply(changes);
+                ar.apply(&changes);
                 ar
             })
             .map_err(|e| {
@@ -148,7 +148,7 @@ where
             .commit_not_exists(stream_id, &changes)
             .await
             .map(|_| {
-                ar.apply(changes);
+                ar.apply(&changes);
                 ar
             })
             .map_err(|e| {
@@ -176,7 +176,7 @@ where
             .commit_exists(stream_id, &changes)
             .await
             .map(|_| {
-                ar.apply(changes);
+                ar.apply(&changes);
                 ar
             })
             .map_err(|e| {
@@ -209,7 +209,7 @@ where
                 }
             })?;
 
-        state.apply(events);
+        state.apply(&events);
         Ok(state)
     }
 
@@ -226,7 +226,7 @@ where
         let mut ar = state;
         let start_position = ar.version();
         let mut f = |e, _| {
-            ar.apply(std::iter::once(e));
+            ar.apply_single(&e);
         };
 
         let _count = self

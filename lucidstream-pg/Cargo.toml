@@ -15,6 +15,5 @@ serde = { workspace = true }
 
 sqlx = { version = "0.6", default-features = false, features = ["runtime-tokio-rustls", "macros", "postgres", "uuid", "chrono", "json", "bigdecimal", "decimal", "bit-vec", "migrate"] }
 uuid = { version = "1", features = ["serde", "v1", "v4", "v5"] }
-fnv = "1.0.3"
 serde_json = { version = "1" }
 

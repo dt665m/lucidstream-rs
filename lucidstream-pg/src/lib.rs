@@ -174,10 +174,10 @@ pub async fn init_domain(pool: &PgPool, domain: &str) -> Result<()> {
         .map_err(Into::into)
 }
 
-pub async fn migrate_tools(pool: &PgPool) {
+pub async fn migrate(pool: &PgPool) {
     static EMBEDDED_MIGRATE: Migrator = sqlx::migrate!();
     EMBEDDED_MIGRATE
         .run(pool)
         .await
-        .expect("tool migration should succed");
+        .expect("migration should succeed");
 }

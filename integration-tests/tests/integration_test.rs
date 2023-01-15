@@ -27,15 +27,13 @@ async fn connect_pg_repo() -> PgRepo {
             .await
             .expect("pool should connect. qed");
     let domain = "it_account";
-    let mut repo = PgRepo::new(pool, domain)
+    lucidstream_pg::migrate(&pool).await;
+    lucidstream_pg::init_domain(&pool, domain)
         .await
-        .expect("pg repo should succeed");
-    let pool = repo.pool();
-    lucidstream_pg::migrate_tools(pool).await;
-    lucidstream_pg::init_domain(pool, domain)
+        .expect("commit procedure creation should succeed. qed");
+    PgRepo::new(pool, domain)
         .await
-        .expect("init should succeed");
-    repo
+        .expect("pg repo should succeed")
 }
 
 #[tokio::test]

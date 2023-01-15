@@ -4,7 +4,7 @@ ORG := dt665m
 PROJECT := lucidstream-rs 
 REPO := github.com/${ORG}/${PROJECT}
 ROOT_DIR := $(CURDIR)
-SEM_VER := $(shell awk -F' = ' '$$1=="version"{print $$2;exit;}' lucidstream/Cargo.toml)
+SEM_VER := $(shell awk -F' = ' '$$1=="version"{print $$2;exit;}' Cargo.toml)
 
 ES_CONTAINER := eventstore
 ifeq ($(shell uname), Darwin)

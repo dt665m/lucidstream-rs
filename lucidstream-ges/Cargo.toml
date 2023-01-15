@@ -1,21 +1,21 @@
 [package]
 name = "lucidstream-ges"
-version = "0.11.0"
-authors = ["Denis Tsai <dt665m@gmail.com>"]
-edition = "2018"
-license = "MIT"
-repository = "https://github.com/dt665m/lucidstream-rs"
 description = "Lucidstream eventstore implementation for www.eventstore.com"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true 
+repository.workspace = true 
 
 [dependencies]
 lucidstream = { path = "../lucidstream" }
 
-log = "0.4"
+log = { workspace = true }
+async-trait = { workspace = true } 
+thiserror = { workspace = true } 
+futures = { workspace = true } 
+serde = { workspace = true, features = ["derive"] }
+
 eventstore = "1.0.0"
 #eventstore = { git = "https://github.com/EventStore/EventStoreDB-Client-Rust", rev = "139a4eb274724797a5b22ed25caaefa8d22ad17b" } 
-async-trait = "0.1"
-thiserror = "1"
-futures = "0.3"
 bytes = "1"
-serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }

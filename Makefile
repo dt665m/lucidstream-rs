@@ -44,9 +44,15 @@ macro-expand:
 
 it-ges: local-es it-run local-down
 
-it-run: 
+it-pg: local-pg it-run-pg 
+
+it-run-es: 
 	cd ${ROOT_DIR}/integration_tests ; \
-	RUST_BACKTRACE=1 RUST_LOG=info cargo test test_all -- --nocapture
+	RUST_BACKTRACE=1 RUST_LOG=info cargo test test_all_es -- --nocapture
+
+it-run-pg: 
+	cd ${ROOT_DIR}/integration_tests ; \
+	RUST_BACKTRACE=1 RUST_LOG=info cargo test test_all_pg -- --nocapture
 
 it-ges-bench: local-es 
 	cd ${ROOT_DIR}/integration_tests ; \
@@ -60,6 +66,11 @@ it-ges-bench: local-es
 local-es:
 	source ${ROOT_DIR}/docker/.env_local; \
 	docker-compose -f ${ROOT_DIR}/docker/docker-compose.yaml up -d eventstore-arm; \
+	sleep 3
+
+local-pg:
+	source ${ROOT_DIR}/docker/.env_local; \
+	docker-compose -f ${ROOT_DIR}/docker/docker-compose.yaml up -d postgres adminer; \
 	sleep 3
 
 local-down:

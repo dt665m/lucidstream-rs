@@ -51,13 +51,17 @@ impl<T: Aggregate> AggregateRoot<T> {
     // ar.handle(${cmd}).take_changes() <--- this leaves the original ar variable intact
     // ```
     pub fn handle(&mut self, command: T::Command) -> Result<&mut Self, T::Error> {
-        let mut events = self.state.handle(command)?;
-        self.changes.append(&mut events);
+        let events = self.state.handle(command)?;
+        self.changes.extend(events);
         Ok(self)
     }
 
     pub fn take_changes(&mut self) -> Vec<T::Event> {
         std::mem::take(&mut self.changes)
+    }
+
+    pub fn changes(&mut self) -> &[T::Event] {
+        &self.changes
     }
 
     pub fn apply_single(&mut self, event: &T::Event) -> &mut Self {
@@ -106,6 +110,15 @@ impl<T: Aggregate> From<AggregateRoot<T>> for Envelope<T> {
             data: state,
         }
     }
+}
+
+/// An envelope for borrowed members for optimization
+#[derive(Debug, Eq, PartialEq, Serialize)]
+pub struct BorrowEnvelope<'a, T> {
+    pub id: &'a str,
+    pub version: u64,
+    #[serde(flatten)]
+    pub data: &'a T,
 }
 
 #[cfg(test)]

@@ -29,3 +29,28 @@ services:
             - 2113:2113
         networks:
             - local
+
+    postgres:
+        image: postgres:13
+        container_name: postgres
+        expose:
+            - 5432/tcp
+        ports:
+            - 5432:5432
+        environment:
+            # POSTGRES_PASSWORD: ${PGPASSWORD}
+            POSTGRES_PASSWORD: 123456
+        networks:
+            - local
+
+    adminer:
+        image: adminer:latest
+        container_name: adminer
+        ports:
+            - 8080:8080
+        environment:
+            ADMINER_DEFAULT_SERVER: postgres
+        networks:
+            - local
+
+

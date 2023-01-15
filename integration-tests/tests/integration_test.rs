@@ -3,7 +3,10 @@ use std::fmt::{self, Display};
 use lucidstream::prelude::*;
 use lucidstream_ges::includes::eventstore::Client;
 use lucidstream_ges::EventStore;
+use lucidstream_pg::Repo as PgRepo;
 use serde::{Deserialize, Serialize};
+use sqlx::postgres::PgPool;
+use uuid::Uuid;
 
 fn init() {
     let _ = pretty_env_logger::try_init();
@@ -18,10 +21,27 @@ async fn connect_ges() -> Client {
         .expect("eventstore connection is required.")
 }
 
+async fn connect_pg_repo() -> PgRepo {
+    let pool =
+        PgPool::connect("postgres://postgres:123456@localhost:5432/postgres?sslmode=disable")
+            .await
+            .expect("pool should connect. qed");
+    let domain = "it_account";
+    let mut repo = PgRepo::new(pool, domain)
+        .await
+        .expect("pg repo should succeed");
+    let pool = repo.pool();
+    lucidstream_pg::migrate_tools(pool).await;
+    lucidstream_pg::init_domain(pool, domain)
+        .await
+        .expect("init should succeed");
+    repo
+}
+
 #[tokio::test]
-async fn test_all() {
+async fn test_all_es() {
     init();
-    log::info!("TEST_ALL");
+    log::info!("TEST_ALL_ES");
     let conn = connect_ges().await;
     let es = EventStore::new(conn.clone(), 5);
     let repo = Repo::new(es);
@@ -56,6 +76,34 @@ async fn test_all() {
     assert_eq!(ar.id(), &id);
     assert_eq!(ar.state().balance, 5);
     log::info!("{:?} {:?}", _count, ar);
+    log::info!("====== complete");
+}
+
+#[tokio::test]
+async fn test_all_pg() {
+    init();
+    log::info!("TEST_ALL_PG");
+    let mut repo = connect_pg_repo().await;
+    let id = Uuid::new_v4();
+
+    // should create a new one
+    let mut ar = repo.load::<Account>(&id).await.unwrap();
+    assert_eq!(ar.id(), &id.to_string());
+
+    log::info!("====== testing ... commands");
+    ar.handle(Command::Credit { value: 5 }).unwrap();
+    repo.commit_with_state(&mut ar, None).await.unwrap();
+    ar.handle(Command::Credit { value: 5 }).unwrap();
+    repo.commit_with_state(&mut ar, None).await.unwrap();
+    ar.handle(Command::Debit { value: 5 }).unwrap();
+    repo.commit_with_state(&mut ar, None).await.unwrap();
+    log::info!("====== complete");
+
+    log::info!("====== testing ... event loading and aggregate rehydration");
+    let ar = repo.load::<Account>(&id).await.unwrap();
+    assert_eq!(ar.id(), &id.to_string());
+    assert_eq!(ar.state().balance, 5);
+    assert_eq!(ar.version(), 3);
     log::info!("====== complete");
 }
 

@@ -1,23 +1,29 @@
 [package]
 name = "integration-tests"
-version = "0.11.0"
-authors = ["Denis Tsai <dt665m@gmail.com>"]
-edition = "2018"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true 
+repository.workspace = true 
 
 [lib]
 doctest = false
 test = false
 
 [dependencies]
+lucidstream-pg = { path = "../lucidstream-pg" }
 lucidstream-ges = { path = "../lucidstream-ges" }
 lucidstream = { path = "../lucidstream" }
 
-log = "0.4"
+log = { workspace = true }
+async-trait = { workspace = true } 
+thiserror = { workspace = true } 
+futures = { workspace = true } 
+serde = { workspace = true, features = ["derive"] }
+
+sqlx = { version = "0.6", default-features = false, features = ["runtime-tokio-rustls", "macros", "postgres", "uuid", "chrono", "json", "bigdecimal", "decimal", "bit-vec", "migrate"] }
+uuid = { version = "1", features = ["serde", "v1", "v4", "v5"] }
 malory = "0.2.1"
 pretty_env_logger = "0.4"
-async-trait = { version = "0.1" }
 tokio = { version = "1", features = ["signal", "rt-multi-thread", "net", "time", "macros"] }
-serde = { version = "1.0.114", features = ["derive"] }
+bytes = "1"
 serde_json = "1"
-bytes = { version = "0.5" }
-

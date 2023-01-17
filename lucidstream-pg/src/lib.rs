@@ -12,6 +12,8 @@ use sqlx::{
 };
 use uuid::Uuid;
 
+pub static EMBEDDED_MIGRATE: Migrator = sqlx::migrate!();
+
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// An envelope for borrowed members for optimization
@@ -175,7 +177,6 @@ pub async fn init_domain(pool: &PgPool, domain: &str) -> Result<()> {
 }
 
 pub async fn migrate(pool: &PgPool) {
-    static EMBEDDED_MIGRATE: Migrator = sqlx::migrate!();
     EMBEDDED_MIGRATE
         .run(pool)
         .await

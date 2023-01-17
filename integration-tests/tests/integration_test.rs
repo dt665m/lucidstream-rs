@@ -27,7 +27,10 @@ async fn connect_pg_repo() -> PgRepo {
             .await
             .expect("pool should connect. qed");
     let domain = "it_account";
-    lucidstream_pg::migrate(&pool).await;
+    lucidstream_pg::EMBEDDED_MIGRATE
+        .run(&pool)
+        .await
+        .expect("migration should succeed");
     lucidstream_pg::init_domain(&pool, domain)
         .await
         .expect("commit procedure creation should succeed. qed");

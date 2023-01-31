@@ -77,7 +77,7 @@ BEGIN
 	('CREATE TABLE IF NOT EXISTS %s 
 		(
             sequence BIGSERIAL,
-            aggregate_id UUID NOT NULL,
+            aggregate_id TEXT NOT NULL,
             id UUID NOT NULL,
             version BIGINT NOT NULL,
             md5short INT NOT NULL,
@@ -105,7 +105,28 @@ BEGIN
 	EXECUTE format
 	('CREATE TABLE IF NOT EXISTS %s 
 		(
-            aggregate_id UUID PRIMARY KEY,
+            aggregate_id TEXT PRIMARY KEY,
+            version BIGINT NOT NULL,
+            current_state JSONB NOT NULL
+        )', _table);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Creates an an aggregate table;
+-- param `_table` is the created table's name
+--
+-- # Example
+--
+-- ```sql
+-- SELECT ls_new_aggregates_table('some_aggregates');
+-- ```
+CREATE OR REPLACE FUNCTION ls_new_aggregates_table_text(_table text) RETURNS VOID
+AS $$
+BEGIN
+	EXECUTE format
+	('CREATE TABLE IF NOT EXISTS %s 
+		(
+            aggregate_id TEXT PRIMARY KEY,
             version BIGINT NOT NULL,
             current_state JSONB NOT NULL
         )', _table);
@@ -125,13 +146,13 @@ $$ LANGUAGE plpgsql;
 -- DROP TABLE IF EXISTS ab_aggregates;
 -- SELECT ls_new_commit_proc('test');
 -- SELECT * FROM test_events_sequence_seq;
--- CALL commit_test('3a7973b7-46fc-4b0b-a6c9-6bce97c67c93'::uuid, 0, 2, '{"hello": "world"}'::jsonb, ARRAY['{"what": "the_hell", "kind": "fun", "version": 1, "id": "a"}', '{"what": "is_this", "kind": "pain", "version": 2, "id": "b"}']::jsonb[], ARRAY['77569696-d2e2-464c-b6a2-795dcbe4ba91'::uuid, '6237ff76-506d-4ccf-af12-c94fc2f4c329'::uuid]);
+-- CALL commit_test('3a7973b7-46fc-4b0b-a6c9-6bce97c67c93', 0, 2, '{"hello": "world"}'::jsonb, ARRAY['{"what": "the_hell", "kind": "fun", "version": 1, "id": "a"}', '{"what": "is_this", "kind": "pain", "version": 2, "id": "b"}']::jsonb[], ARRAY['77569696-d2e2-464c-b6a2-795dcbe4ba91'::uuid, '6237ff76-506d-4ccf-af12-c94fc2f4c329'::uuid]);
 -- SELECT * FROM test_events_sequence_seq;
--- CALL commit_test('3a7973b7-46fc-4b0b-a6c9-6bce97c67c93'::uuid, 2, 4, '{"hello": "world"}'::jsonb, ARRAY['{"what": "the_hell", "kind": "fun", "version": 1, "id": "a"}', '{"what": "is_this", "kind": "pain", "version": 2, "id": "b"}']::jsonb[], ARRAY['77569696-d2e2-464c-b6a2-795dcbe4ba91'::uuid, '6237ff76-506d-4ccf-af12-c94fc2f4c329'::uuid]);
+-- CALL commit_test('3a7973b7-46fc-4b0b-a6c9-6bce97c67c93', 2, 4, '{"hello": "world"}'::jsonb, ARRAY['{"what": "the_hell", "kind": "fun", "version": 1, "id": "a"}', '{"what": "is_this", "kind": "pain", "version": 2, "id": "b"}']::jsonb[], ARRAY['77569696-d2e2-464c-b6a2-795dcbe4ba91'::uuid, '6237ff76-506d-4ccf-af12-c94fc2f4c329'::uuid]);
 -- SELECT * FROM test_events_sequence_seq;
 -- SELECT ls_check_sequence_integrity('test');
 -- SELECT * FROM test_events_sequence_seq;
--- CALL commit_test('3a7973b7-46fc-4b0b-a6c9-6bce97c67c93'::uuid, 2, 4, '{"hello": "world"}'::jsonb, ARRAY['{"what": "the_hell", "kind": "fun", "version": 3, "id": "a"}', '{"what": "is_this", "kind": "pain", "version": 4, "id": "b"}']::jsonb[], ARRAY['91bff2c9-ac9f-4335-8d44-a2c202dd76af'::uuid, '37bb5d8b-76f8-447e-bbe5-c6ccaf818c3f'::uuid]);
+-- CALL commit_test('3a7973b7-46fc-4b0b-a6c9-6bce97c67c93', 2, 4, '{"hello": "world"}'::jsonb, ARRAY['{"what": "the_hell", "kind": "fun", "version": 3, "id": "a"}', '{"what": "is_this", "kind": "pain", "version": 4, "id": "b"}']::jsonb[], ARRAY['91bff2c9-ac9f-4335-8d44-a2c202dd76af'::uuid, '37bb5d8b-76f8-447e-bbe5-c6ccaf818c3f'::uuid]);
 -- ```
 CREATE OR REPLACE FUNCTION ls_new_commit_proc(_domainName text) RETURNS VOID 
 AS $outer$
@@ -141,7 +162,7 @@ BEGIN
 
 	EXECUTE format
 	('CREATE OR REPLACE PROCEDURE %1$s_commit(
-            expect_aggregate_id UUID, expect_version BIGINT, updated_version BIGINT, state JSONB, events JSONB[], event_ids UUID[]
+            expect_aggregate_id TEXT, expect_version BIGINT, updated_version BIGINT, state JSONB, events JSONB[], event_ids UUID[]
         ) AS $inner$
 
 			DECLARE

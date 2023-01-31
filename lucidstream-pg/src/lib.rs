@@ -19,7 +19,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// An envelope for borrowed members for optimization
 #[derive(Debug, Eq, PartialEq, Serialize)]
 pub struct CommitEnvelope<'a, T> {
-    pub aggregate_id: &'a Uuid,
+    pub aggregate_id: &'a str,
     pub version: i64,
     #[serde(flatten)]
     pub data: &'a T,
@@ -90,7 +90,7 @@ impl Repo {
 
     pub async fn load<T: Aggregate + DeserializeOwned + Unpin>(
         &mut self,
-        id: &Uuid,
+        id: &str,
     ) -> Result<AggregateRoot<T>>
     where
         T::Event: Unpin,
@@ -130,7 +130,7 @@ impl Repo {
         let expected_version: i64 = aggregate.version().try_into()?;
         let aggregate = aggregate.apply(&events);
         let updated_version: i64 = aggregate.version().try_into()?;
-        let aggregate_id = Uuid::parse_str(aggregate.id())?;
+        let aggregate_id = aggregate.id();
 
         // prepare for serialization
         let events_jsonb = (1i64..)

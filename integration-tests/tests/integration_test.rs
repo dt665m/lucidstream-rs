@@ -88,8 +88,11 @@ async fn test_all_pg() {
     let id = Uuid::new_v4();
 
     // should create a new one
-    let mut ar = repo.load::<Account>(&id).await.unwrap();
-    assert_eq!(ar.id(), &id.to_string());
+    let mut ar = repo
+        .load::<Account>(&id.simple().to_string())
+        .await
+        .unwrap();
+    assert_eq!(ar.id(), &id.simple().to_string());
 
     log::info!("====== testing ... commands");
     ar.handle(Command::Credit { value: 5 }).unwrap();
@@ -101,8 +104,11 @@ async fn test_all_pg() {
     log::info!("====== complete");
 
     log::info!("====== testing ... event loading and aggregate rehydration");
-    let ar = repo.load::<Account>(&id).await.unwrap();
-    assert_eq!(ar.id(), &id.to_string());
+    let ar = repo
+        .load::<Account>(&id.simple().to_string())
+        .await
+        .unwrap();
+    assert_eq!(ar.id(), &id.simple().to_string());
     assert_eq!(ar.state().balance, 5);
     assert_eq!(ar.version(), 3);
     log::info!("====== complete");

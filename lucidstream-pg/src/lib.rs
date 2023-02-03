@@ -242,10 +242,10 @@ pub struct QueryEvent<T, U> {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-struct InnerData<T, U> {
+pub struct InnerData<T, U> {
     #[serde(flatten)]
-    data: T,
-    metadata: Option<U>,
+    pub data: T,
+    pub metadata: Option<U>,
 }
 
 impl<T, U> FromRow<'_, PgRow> for QueryEvent<T, U>

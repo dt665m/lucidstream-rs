@@ -112,27 +112,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Creates an an aggregate table;
--- param `_table` is the created table's name
---
--- # Example
---
--- ```sql
--- SELECT ls_new_aggregates_table('some_aggregates');
--- ```
-CREATE OR REPLACE FUNCTION ls_new_aggregates_table_text(_table text) RETURNS VOID
-AS $$
-BEGIN
-	EXECUTE format
-	('CREATE TABLE IF NOT EXISTS %s 
-		(
-            aggregate_id TEXT PRIMARY KEY,
-            version BIGINT NOT NULL,
-            current_state JSONB NOT NULL
-        )', _table);
-END;
-$$ LANGUAGE plpgsql;
-
 -- Creates the stored procedure that enables the event sourcing + projection system to work for any given type of aggregate.
 -- These are the magic rules we are enforcing at the data entry level to enable the event sourcing paradigm.
 -- Guarantees:

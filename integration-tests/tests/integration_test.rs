@@ -82,6 +82,8 @@ async fn test_all_es() {
 
 #[tokio::test]
 async fn test_all_pg() {
+    use lucidstream_pg::ManualEvent;
+
     init();
     log::info!("TEST_ALL_PG");
     let mut repo = connect_pg_repo().await;
@@ -95,12 +97,33 @@ async fn test_all_pg() {
     assert_eq!(ar.id(), &id.simple().to_string());
 
     log::info!("====== testing ... commands");
+    let mut all_events = vec![];
     ar.handle(Command::Credit { value: 5 }).unwrap();
-    repo.commit_with_state(&mut ar, None).await.unwrap();
+    all_events.extend(repo.commit_with_state(&mut ar).await.unwrap());
     ar.handle(Command::Credit { value: 5 }).unwrap();
-    repo.commit_with_state(&mut ar, None).await.unwrap();
+    all_events.extend(repo.commit_with_state(&mut ar).await.unwrap());
     ar.handle(Command::Debit { value: 5 }).unwrap();
-    repo.commit_with_state(&mut ar, None).await.unwrap();
+    all_events.extend(repo.commit_with_state(&mut ar).await.unwrap());
+
+    log::info!("====== testing ... manual commit");
+    ar.handle(Command::Credit { value: 5 }).unwrap();
+    let events = ar.take_changes();
+    let expected_version: i64 = ar.version().try_into().unwrap();
+    let ar = ar.apply(&events);
+    let manual_event_id = Uuid::parse_str("00000000-0000-0000-0000-00000000beef").unwrap();
+    let manual_metadata = 42;
+    let manual_events = events
+        .iter()
+        .map(|event| ManualEvent {
+            event,
+            metadata: Some(&manual_metadata),
+            id: manual_event_id,
+        })
+        .collect::<Vec<ManualEvent<Event, i32>>>();
+    repo.manual_commit(expected_version, ar, &manual_events)
+        .await
+        .unwrap();
+    all_events.extend(events);
     log::info!("====== complete");
 
     log::info!("====== testing ... event loading and aggregate rehydration");
@@ -109,8 +132,22 @@ async fn test_all_pg() {
         .await
         .unwrap();
     assert_eq!(ar.id(), &id.simple().to_string());
-    assert_eq!(ar.state().balance, 5);
-    assert_eq!(ar.version(), 3);
+    assert_eq!(ar.state().balance, 10);
+    assert_eq!(ar.version(), 4);
+
+    let history = repo
+        .select_events_from::<Account, i32>(0, 5, 5)
+        .await
+        .unwrap();
+    assert_eq!(history.len(), 4);
+
+    history.iter().enumerate().for_each(|(i, x)| {
+        assert_eq!(all_events[i], x.data);
+        if let Some(metadata) = x.metadata {
+            assert_eq!(metadata, manual_metadata);
+            assert_eq!(x.id, manual_event_id);
+        }
+    });
     log::info!("====== complete");
 }
 
@@ -177,6 +214,7 @@ impl Display for Command {
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
+#[serde(tag = "kind")]
 pub enum Event {
     Created { owner: String },
     Credited { value: i64 },

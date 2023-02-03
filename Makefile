@@ -44,7 +44,8 @@ macro-expand:
 
 it-ges: local-es it-run local-down
 
-it-pg: local-pg it-run-pg local-down
+it-pg: local-pg it-run-pg 
+# it-pg: local-pg it-run-pg local-down
 
 it-run-es: 
 	cd ${ROOT_DIR}/integration_tests ; \

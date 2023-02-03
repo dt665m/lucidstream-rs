@@ -6,7 +6,7 @@ use std::{fmt::Debug, marker::Unpin, num::TryFromIntError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sqlx::{
     migrate::Migrator,
-    postgres::{PgPool, PgRow, Postgres},
+    postgres::{PgNotification, PgPool, PgRow, Postgres},
     types::Json,
     Executor, FromRow, Row,
 };
@@ -242,7 +242,7 @@ pub struct QueryEvent<T, U> {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct InnerData<T, U> {
+struct InnerData<T, U> {
     #[serde(flatten)]
     pub data: T,
     pub metadata: Option<U>,
@@ -321,6 +321,44 @@ pub async fn init_domain(pool: &PgPool, domain: &str) -> Result<()> {
         .await
         .map(|_| ())
         .map_err(Into::into)
+}
+
+#[derive(Deserialize, Debug)]
+pub struct LucidNotification<T> {
+    pub origin: String,
+    pub op: String,
+    pub record: T,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct HackEventContainer<T, U> {
+    pub sequence: i64,
+    pub aggregate_id: String,
+    pub id: Uuid,
+    pub version: i64,
+    pub data: InnerData<T, U>,
+}
+
+impl<T, U> From<HackEventContainer<T, U>> for QueryEvent<T, U> {
+    fn from(hack: HackEventContainer<T, U>) -> Self {
+        Self {
+            sequence: hack.sequence,
+            aggregate_id: hack.aggregate_id,
+            id: hack.id,
+            version: hack.version,
+            data: hack.data.data,
+            metadata: hack.data.metadata,
+        }
+    }
+}
+
+impl<T: DeserializeOwned> From<PgNotification> for QueryEvent<T, ()> {
+    fn from(value: PgNotification) -> Self {
+        serde_json::from_str::<LucidNotification<HackEventContainer<T, ()>>>(value.payload())
+            .expect("PgNotification parse can't failed")
+            .record
+            .into()
+    }
 }
 
 pub async fn migrate(pool: &PgPool) {

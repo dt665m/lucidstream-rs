@@ -73,7 +73,7 @@ impl Repo {
         Ok(repo)
     }
 
-    pub fn pool(&mut self) -> &PgPool {
+    pub fn pool(&self) -> &PgPool {
         &self.pool
     }
 

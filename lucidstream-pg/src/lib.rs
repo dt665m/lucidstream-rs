@@ -77,6 +77,10 @@ impl Repo {
         &self.pool
     }
 
+    pub fn domain(&self) -> &str {
+        &self.domain
+    }
+
     pub async fn load<T: Aggregate + DeserializeOwned + Unpin>(
         &mut self,
         id: &str,

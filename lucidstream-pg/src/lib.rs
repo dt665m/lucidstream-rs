@@ -352,9 +352,9 @@ impl<T, U> From<HackEventContainer<T, U>> for QueryEvent<T, U> {
     }
 }
 
-impl<T: DeserializeOwned> From<PgNotification> for QueryEvent<T, ()> {
+impl<T: DeserializeOwned, U: DeserializeOwned> From<PgNotification> for QueryEvent<T, U> {
     fn from(value: PgNotification) -> Self {
-        serde_json::from_str::<LucidNotification<HackEventContainer<T, ()>>>(value.payload())
+        serde_json::from_str::<LucidNotification<HackEventContainer<T, U>>>(value.payload())
             .expect("PgNotification parse can't failed")
             .record
             .into()

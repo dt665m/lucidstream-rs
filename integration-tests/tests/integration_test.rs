@@ -124,6 +124,47 @@ async fn test_all_pg() {
         .await
         .unwrap();
     all_events.extend(events);
+
+    log::info!("====== testing ... manual commit accidental same UUID");
+    ar.handle(Command::Credit { value: 5 }).unwrap();
+    let events = ar.take_changes();
+    let expected_version: i64 = ar.version().try_into().unwrap();
+    let mut bad_ar = ar.clone();
+    let bad_ar = bad_ar.apply(&events);
+    let manual_event_id = Uuid::parse_str("00000000-0000-0000-0000-00000000beef").unwrap();
+    let manual_metadata = 43;
+    let manual_events = events
+        .iter()
+        .map(|event| ManualEvent {
+            event,
+            metadata: Some(&manual_metadata),
+            id: manual_event_id,
+        })
+        .collect::<Vec<ManualEvent<Event, i32>>>();
+    let res = repo
+        .manual_commit(expected_version, bad_ar, &manual_events)
+        .await;
+    assert!(res.is_err());
+
+    log::info!("====== testing ... manual commit again to check if sequence has holes");
+    ar.handle(Command::Credit { value: 5 }).unwrap();
+    let events = ar.take_changes();
+    let expected_version: i64 = ar.version().try_into().unwrap();
+    let ar = ar.apply(&events);
+    let manual_event_id_2 = Uuid::parse_str("00000000-0000-0000-0000-00000000beff").unwrap();
+    let manual_metadata = 42;
+    let manual_events = events
+        .iter()
+        .map(|event| ManualEvent {
+            event,
+            metadata: Some(&manual_metadata),
+            id: manual_event_id_2,
+        })
+        .collect::<Vec<ManualEvent<Event, i32>>>();
+    repo.manual_commit(expected_version, ar, &manual_events)
+        .await
+        .unwrap();
+    all_events.extend(events);
     log::info!("====== complete");
 
     log::info!("====== testing ... event loading and aggregate rehydration");
@@ -132,20 +173,25 @@ async fn test_all_pg() {
         .await
         .unwrap();
     assert_eq!(ar.id(), &id.simple().to_string());
-    assert_eq!(ar.state().balance, 10);
-    assert_eq!(ar.version(), 4);
+    assert_eq!(ar.state().balance, 15);
+    assert_eq!(ar.version(), 5);
 
     let history = repo
         .select_events_from::<Account, i32>(0, 5, 5)
         .await
         .unwrap();
-    assert_eq!(history.len(), 4);
+    assert_eq!(history.len(), 5);
 
     history.iter().enumerate().for_each(|(i, x)| {
+        assert_eq!(i as i64 + 1, x.sequence);
         assert_eq!(all_events[i], x.data);
         if let Some(metadata) = x.metadata {
             assert_eq!(metadata, manual_metadata);
-            assert_eq!(x.id, manual_event_id);
+            if x.sequence == 4 {
+                assert_eq!(x.id, manual_event_id);
+            } else if x.sequence == 5 {
+                assert_eq!(x.id, manual_event_id_2);
+            }
         }
     });
     log::info!("====== complete");

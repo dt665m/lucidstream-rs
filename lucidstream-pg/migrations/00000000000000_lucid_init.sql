@@ -164,6 +164,13 @@ BEGIN
 					INSERT INTO %1$s_aggregates (aggregate_id, version, current_state) 
 						VALUES (expect_aggregate_id, updated_version, state);
 				ELSIF saved_version = expect_version THEN
+                    -- double check events dont exist from accidental reuse of ids
+                    FOR i IN 1..event_len LOOP
+                        new_event_id := event_ids[i];
+                        IF EXISTS(SELECT FROM %1$s_events WHERE id = new_event_id) THEN
+					        RAISE EXCEPTION ''event id reused: %%'', new_event_id;
+                        END IF;
+                    END LOOP;
                     UPDATE %1$s_aggregates SET version = updated_version, current_state = state WHERE aggregate_id = expect_aggregate_id;
                 ELSE
                     -- check if we already commit the events in the past by checking the event_ids and the content hash

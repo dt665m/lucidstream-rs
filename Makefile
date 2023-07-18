@@ -42,7 +42,7 @@ macro-expand:
 ###########################################################
 ### Integration Tests
 
-it-ges: local-es it-run local-down
+it-ges: local-es it-run-es local-down
 
 it-pg: local-pg it-run-pg 
 # it-pg: local-pg it-run-pg local-down

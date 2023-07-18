@@ -16,9 +16,7 @@ async fn connect_ges() -> Client {
     let settings = "esdb://admin:changeit@localhost:2113?tls=false"
         .parse()
         .expect("eventstore url should be valid.");
-    Client::create(settings)
-        .await
-        .expect("eventstore connection is required.")
+    Client::new(settings).expect("eventstore connection is required.")
 }
 
 async fn connect_pg_repo() -> PgRepo {

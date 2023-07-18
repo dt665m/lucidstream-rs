@@ -3,10 +3,9 @@ use std::fmt::Display;
 use async_trait::async_trait;
 use bytes::Bytes;
 use eventstore::{
-    AppendToStreamOptions, Client, EventData, ExpectedRevision, ReadResult, ReadStreamOptions,
-    ResolvedEvent, Single, StreamPosition,
+    AppendToStreamOptions, Client, EventData, ExpectedRevision, ReadStreamOptions, ResolvedEvent,
+    StreamPosition,
 };
-use futures::prelude::*;
 use lucidstream::traits::{EventStore as EventStoreT, Retryable};
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -140,20 +139,17 @@ impl EventStoreT for EventStore {
         let write_result = self.inner.append_to_stream(id, &opts, events).await?;
 
         log::debug!("write result: {:?}", write_result);
-        write_result
-            .map(|_| ())
-            .map_err(|_| Error::WrongExpectedVersion)
+        Ok(())
     }
 
     async fn exists(&self, id: &Self::Id) -> Result<bool> {
-        match self
+        Ok(self
             .inner
-            .read_stream(id, &Default::default(), Single)
+            .read_stream(id, &ReadStreamOptions::default().max_count(1))
             .await?
-        {
-            ReadResult::Ok(_) => Ok(true),
-            _ => Ok(false),
-        }
+            .next()
+            .await?
+            .is_some())
     }
 }
 
@@ -175,9 +171,7 @@ where
     let write_result = conn.append_to_stream(stream_id, &opts, event_datum).await?;
 
     log::debug!("write result: {:?}", write_result);
-    write_result
-        .map(|_| ())
-        .map_err(|_| Error::WrongExpectedVersion)
+    Ok(())
 }
 
 async fn load_all_events<E, F>(
@@ -222,26 +216,26 @@ where
     E: DeserializeOwned,
     F: FnMut(E, Bytes),
 {
-    let opts = ReadStreamOptions::default().position(StreamPosition::Point(start_position));
-    let res = conn.read_stream(&stream_id, &opts, load_count).await?;
+    let opts = ReadStreamOptions::default()
+        .position(StreamPosition::Position(start_position))
+        .max_count(load_count);
 
+    let mut stream = conn.read_stream(&stream_id, &opts).await?;
     let mut count = 0;
-    if let ReadResult::Ok(mut stream) = res {
-        while let Some(resolved) = stream.try_next().await? {
-            let ResolvedEvent { event, .. } = resolved;
-            let event = event.ok_or(Error::MissingEvent)?;
-            count += 1;
+    while let Some(resolved) = stream.next().await? {
+        let ResolvedEvent { event, .. } = resolved;
+        let event = event.ok_or(Error::MissingEvent)?;
+        count += 1;
 
-            log::debug!(
-                "event: {:?}\n  streamid: {:?}\n  revison: {:?}\n  position: {:?}\n  count: {:?}",
-                event.event_type,
-                event.stream_id,
-                event.revision,
-                event.position,
-                count
-            );
-            f(event.as_json()?, event.custom_metadata);
-        }
+        log::debug!(
+            "event: {:?}\n  streamid: {:?}\n  revison: {:?}\n  position: {:?}\n  count: {:?}",
+            event.event_type,
+            event.stream_id,
+            event.revision,
+            event.position,
+            count
+        );
+        f(event.as_json()?, event.custom_metadata);
     }
 
     Ok(count)

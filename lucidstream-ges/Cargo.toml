@@ -12,10 +12,9 @@ lucidstream = { path = "../lucidstream" }
 log = { workspace = true }
 async-trait = { workspace = true } 
 thiserror = { workspace = true } 
-futures = { workspace = true } 
 serde = { workspace = true, features = ["derive"] }
 
-eventstore = "1.0.0"
+eventstore = "2.2.0"
 #eventstore = { git = "https://github.com/EventStore/EventStoreDB-Client-Rust", rev = "139a4eb274724797a5b22ed25caaefa8d22ad17b" } 
 bytes = "1"
 serde_json = { version = "1" }

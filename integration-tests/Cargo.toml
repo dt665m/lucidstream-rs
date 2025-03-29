@@ -2,8 +2,8 @@
 name = "integration-tests"
 authors.workspace = true
 version.workspace = true
-edition.workspace = true 
-repository.workspace = true 
+edition.workspace = true
+repository.workspace = true
 
 [lib]
 doctest = false
@@ -15,15 +15,32 @@ lucidstream-ges = { path = "../lucidstream-ges" }
 lucidstream = { path = "../lucidstream" }
 
 log = { workspace = true }
-async-trait = { workspace = true } 
-thiserror = { workspace = true } 
-futures = { workspace = true } 
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
-sqlx = { version = "0.6", default-features = false, features = ["runtime-tokio-rustls", "macros", "postgres", "uuid", "chrono", "json", "bigdecimal", "decimal", "bit-vec", "migrate"] }
+sqlx = { version = "0.5", default-features = false, features = [
+  "runtime-tokio-rustls",
+  "macros",
+  "postgres",
+  "uuid",
+  "chrono",
+  "json",
+  "bigdecimal",
+  "decimal",
+  "bit-vec",
+  "migrate",
+] }
 uuid = { version = "1", features = ["serde", "v1", "v4", "v5"] }
 malory = "0.2.1"
 pretty_env_logger = "0.4"
-tokio = { version = "1", features = ["signal", "rt-multi-thread", "net", "time", "macros"] }
+tokio = { version = "1", features = [
+  "signal",
+  "rt-multi-thread",
+  "net",
+  "time",
+  "macros",
+] }
 bytes = "1"
 serde_json = "1"

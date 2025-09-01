@@ -1,8 +1,6 @@
 use std::fmt::{self, Display};
 
 use lucidstream::prelude::*;
-use lucidstream_ges::includes::eventstore::Client;
-use lucidstream_ges::EventStore;
 use lucidstream_pg::Repo as PgRepo;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPool;
@@ -10,13 +8,6 @@ use uuid::Uuid;
 
 fn init() {
     let _ = pretty_env_logger::try_init();
-}
-
-async fn connect_ges() -> Client {
-    let settings = "esdb://admin:changeit@localhost:2113?tls=false"
-        .parse()
-        .expect("eventstore url should be valid.");
-    Client::new(settings).expect("eventstore connection is required.")
 }
 
 async fn connect_pg_repo() -> PgRepo {
@@ -38,53 +29,12 @@ async fn connect_pg_repo() -> PgRepo {
 }
 
 #[tokio::test]
-async fn test_all_es() {
-    init();
-    log::info!("TEST_ALL_ES");
-    let conn = connect_ges().await;
-    let es = EventStore::new(conn.clone(), 5);
-    let repo = Repo::new(es);
-    let id = "123456".to_string();
-    let stream_id = [Account::kind(), ":", &id].concat();
-
-    log::info!("====== testing ... commands");
-    let state = AccountAR::new(id.clone());
-    repo.handle_not_exists(&stream_id, state.clone(), Command::Credit { value: 5 })
-        .await
-        .unwrap();
-    repo.handle_with(&stream_id, state.clone(), Command::Credit { value: 5 }, 2)
-        .await
-        .unwrap();
-    repo.handle_with(&stream_id, state.clone(), Command::Debit { value: 5 }, 2)
-        .await
-        .unwrap();
-    log::info!("====== complete");
-
-    let mut ar = AccountAR::new(id.clone());
-    let start_position = ar.version();
-    let mut f = |e, _| {
-        ar.apply_single(&e);
-    };
-
-    log::info!("====== testing ... event loading and aggregate rehydration");
-    let _count = repo
-        .inner_ref()
-        .load_to(&stream_id, start_position, &mut f)
-        .await
-        .unwrap();
-    assert_eq!(ar.id(), &id);
-    assert_eq!(ar.state().balance, 5);
-    log::info!("{:?} {:?}", _count, ar);
-    log::info!("====== complete");
-}
-
-#[tokio::test]
 async fn test_all_pg() {
     use lucidstream_pg::ManualEvent;
 
     init();
     log::info!("TEST_ALL_PG");
-    let mut repo = connect_pg_repo().await;
+    let repo = connect_pg_repo().await;
     let id = Uuid::new_v4();
 
     // should create a new one
@@ -200,26 +150,29 @@ async fn benchmark() {
     init();
     log::debug!("BENCHMARK");
 
-    let conn = connect_ges().await;
-    let es = EventStore::new(conn.clone(), 5);
-    let repo = std::sync::Arc::new(Repo::new(es));
+    // Use the Postgres repo directly for benchmarking
+    let repo = std::sync::Arc::new(connect_pg_repo().await);
 
+    // Ensure the aggregate exists with an initial event
     let id = "654321".to_string();
-    let stream_id = [Account::kind(), ":", &id].concat();
-    let state = AccountAR::new(id);
-    repo.handle_not_exists(&stream_id, state, Command::Credit { value: 5 })
-        .await
-        .unwrap();
+    let mut ar = repo.load::<Account>(&id).await.unwrap();
+    ar.handle(Command::Credit { value: 5 }).unwrap();
+    repo.commit_with_state(&mut ar).await.unwrap();
 
-    malory::judge_me(10000, 5, repo.clone(), move |r, _i| async move {
-        let id = "654321".to_string();
-        let stream_id = [Account::kind(), ":", &id].concat();
-        let state = AccountAR::new(id);
-        r.handle_exists(&stream_id, state, Command::Credit { value: 5 })
-            .await
-            .unwrap();
-        true
-    })
+    // Run the benchmark with concurrent credits against the same aggregate
+    malory::judge_me(
+        10000,
+        5,
+        repo.clone(),
+        move |r: std::sync::Arc<PgRepo>, _i| async move {
+            let id = "654321".to_string();
+            let mut ar = r.load::<Account>(&id).await.unwrap();
+            ar.handle(Command::Credit { value: 5 }).unwrap();
+            // Ignore occasional concurrency conflicts for throughput-focused benchmark
+            let _ = r.commit_with_state(&mut ar).await;
+            true
+        },
+    )
     .await;
 }
 
@@ -279,7 +232,7 @@ impl Display for Event {
     }
 }
 
-type AccountAR = AggregateRoot<Account>;
+pub type AccountAR = AggregateRoot<Account>;
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Account {

@@ -1,25 +1,25 @@
 [workspace.package]
-version = "0.14.0"
+version = "0.20.0"
 authors = ["Denis Tsai <dt665m@gmail.com>"]
-edition = "2021"
+edition = "2024"
 license = "MIT"
 repository = "https://github.com/dt665m/lucidstream-rs"
 
 [workspace.dependencies]
 log = "0.4"
 anyhow = "1"
-thiserror = "1"
+thiserror = "2"
 async-trait = "0.1"
 futures = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 
 [workspace]
+resolver = "3"
 members = [
   "lucidstream",
-	# "lucidstream-derive",
-  "lucidstream-ges",
+  # "lucidstream-derive",
   "lucidstream-pg",
   "lucidstream-inmemory",
 
-  "integration-tests"
+  "integration-tests",
 ]

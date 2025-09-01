@@ -3,12 +3,12 @@ use lucidstream::types::AggregateRoot;
 
 use std::{fmt::Debug, marker::Unpin, num::TryFromIntError};
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{
+    Executor, FromRow, Row,
     migrate::Migrator,
     postgres::{PgNotification, PgPool, PgRow, Postgres},
     types::Json,
-    Executor, FromRow, Row,
 };
 use uuid::Uuid;
 
@@ -29,7 +29,7 @@ pub struct CommitEnvelope<'a, T, U = ()> {
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("sqlx error: `{0}`")]
-    Sqlx(#[from] sqlx::Error),
+    Sqlx(sqlx::Error),
 
     #[error("Int Conversion error: `{0}`")]
     IntConversion(#[from] TryFromIntError),
@@ -53,6 +53,12 @@ pub enum Error {
     MigrationFailed(String),
 }
 
+impl From<sqlx::Error> for Error {
+    fn from(value: sqlx::Error) -> Self {
+        map_commit_error(value)
+    }
+}
+
 //#TODO this might work if we just turned this into an EventStore trait
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -66,7 +72,7 @@ pub struct Repo {
 
 impl Repo {
     pub async fn new<S: Into<String>>(pool: PgPool, domain: S) -> Result<Self> {
-        let domain = domain.into();
+        let domain: String = domain.into();
         validate_domain(&domain)?;
         let commit_proc = format!("CALL {}_commit($1, $2, $3, $4, $5, $6)", &domain);
         let aggregate_query = format!(
@@ -74,9 +80,8 @@ impl Repo {
             &domain
         );
 
-        let mut repo = Self {
+        let repo = Self {
             pool,
-
             domain,
             commit_proc,
             aggregate_query,
@@ -151,8 +156,7 @@ impl Repo {
             .bind(events_jsonb)
             .bind(event_ids)
             .execute(&self.pool)
-            .await
-            .map_err(|e| map_commit_error(e, &self.domain))?;
+            .await?;
         Ok(events)
     }
 
@@ -194,8 +198,7 @@ impl Repo {
             .bind(events_jsonb)
             .bind(event_ids)
             .execute(&self.pool)
-            .await
-            .map_err(|e| map_commit_error(e, &self.domain))?;
+            .await?;
         Ok(events)
     }
 
@@ -248,8 +251,7 @@ impl Repo {
             .bind(events_jsonb)
             .bind(event_ids)
             .execute(&self.pool)
-            .await
-            .map_err(|e| map_commit_error(e, &self.domain))?;
+            .await?;
         Ok(())
     }
 
@@ -261,7 +263,6 @@ impl Repo {
             .map(|_| ())
             .map_err(Into::into)
     }
-
 
     pub async fn select_latest_sequence(&self) -> Result<i64> {
         select_latest_sequence(&self.pool, &self.domain)
@@ -448,11 +449,13 @@ fn validate_domain(domain: &str) -> Result<()> {
     Ok(())
 }
 
-fn map_commit_error(e: sqlx::Error, domain: &str) -> Error {
+fn map_commit_error(e: sqlx::Error) -> Error {
     if let sqlx::Error::Database(db_err) = &e {
-        let code = db_err.code().as_deref().unwrap_or("");
+        let code_opt = db_err.code();
+        let code = code_opt.as_deref().unwrap_or("");
         let msg = db_err.message();
-        let constraint = db_err.constraint().unwrap_or("");
+        let constraint_opt = db_err.constraint();
+        let constraint = constraint_opt.as_deref().unwrap_or("");
 
         // Unique violation
         if code == "23505" {

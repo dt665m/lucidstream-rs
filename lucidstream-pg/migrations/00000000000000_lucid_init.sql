@@ -25,8 +25,7 @@ BEGIN
         NEW.updated_at IS NOT DISTINCT FROM OLD.updated_at
     ) THEN
         NEW.updated_at := current_timestamp;
-END
-IF;
+    END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -76,7 +75,7 @@ BEGIN
 	EXECUTE format
 	('CREATE TABLE IF NOT EXISTS %s 
 		(
-            sequence BIGSERIAL,
+            sequence BIGSERIAL PRIMARY KEY,
             aggregate_id TEXT NOT NULL,
             id UUID NOT NULL,
             version BIGINT NOT NULL,

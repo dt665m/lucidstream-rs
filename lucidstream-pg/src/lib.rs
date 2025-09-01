@@ -36,6 +36,21 @@ pub enum Error {
 
     #[error("Invalid UUID")]
     UuidError(#[from] uuid::Error),
+
+    #[error("Invalid domain name: `{0}`")]
+    InvalidDomain(String),
+
+    #[error("Optimistic concurrency conflict")]
+    Concurrency,
+
+    #[error("Duplicate event id")]
+    DuplicateEventId,
+
+    #[error("Invalid commit: event length or ids mismatch")]
+    InvalidCommit,
+
+    #[error("Migration failed: `{0}`")]
+    MigrationFailed(String),
 }
 
 //#TODO this might work if we just turned this into an EventStore trait
@@ -52,6 +67,7 @@ pub struct Repo {
 impl Repo {
     pub async fn new<S: Into<String>>(pool: PgPool, domain: S) -> Result<Self> {
         let domain = domain.into();
+        validate_domain(&domain)?;
         let commit_proc = format!("CALL {}_commit($1, $2, $3, $4, $5, $6)", &domain);
         let aggregate_query = format!(
             "SELECT current_state FROM {}_aggregates WHERE aggregate_id = $1",
@@ -82,7 +98,7 @@ impl Repo {
     }
 
     pub async fn load<T: Aggregate + DeserializeOwned + Unpin>(
-        &mut self,
+        &self,
         id: &str,
     ) -> Result<AggregateRoot<T>>
     where
@@ -98,7 +114,7 @@ impl Repo {
     }
 
     pub async fn commit_with_state<T: Aggregate + Serialize>(
-        &mut self,
+        &self,
         aggregate: &mut AggregateRoot<T>,
     ) -> Result<Vec<T::Event>> {
         let event_len = aggregate.changes().len();
@@ -135,8 +151,51 @@ impl Repo {
             .bind(events_jsonb)
             .bind(event_ids)
             .execute(&self.pool)
-            .await?;
+            .await
+            .map_err(|e| map_commit_error(e, &self.domain))?;
+        Ok(events)
+    }
 
+    /// Commit using caller-provided event IDs to enable idempotent retries
+    pub async fn commit_with_state_with_ids<T: Aggregate + Serialize>(
+        &self,
+        aggregate: &mut AggregateRoot<T>,
+        event_ids: &[Uuid],
+    ) -> Result<Vec<T::Event>> {
+        let event_len = aggregate.changes().len();
+        assert!(event_len > 0, "cannot have zero changes in aggregate");
+        if event_ids.len() != event_len {
+            return Err(Error::InvalidCommit);
+        }
+
+        let events = aggregate.take_changes();
+        let expected_version: i64 = aggregate.version().try_into()?;
+        let aggregate = aggregate.apply(&events);
+        let updated_version: i64 = aggregate.version().try_into()?;
+        let aggregate_id = aggregate.id();
+
+        let events_jsonb = (1i64..)
+            .zip(events.iter().zip(event_ids.iter()))
+            .map(|(i, (data, _id))| {
+                Json(CommitEnvelope {
+                    aggregate_id: &aggregate_id,
+                    version: expected_version + i,
+                    data,
+                    metadata: None::<&()>,
+                })
+            })
+            .collect::<Vec<Json<CommitEnvelope<T::Event>>>>();
+
+        sqlx::query(&self.commit_proc)
+            .bind(aggregate_id)
+            .bind(expected_version)
+            .bind(updated_version)
+            .bind(Json(&aggregate))
+            .bind(events_jsonb)
+            .bind(event_ids)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| map_commit_error(e, &self.domain))?;
         Ok(events)
     }
 
@@ -190,11 +249,11 @@ impl Repo {
             .bind(event_ids)
             .execute(&self.pool)
             .await
-            .map(|_| ())
-            .map_err(Into::into)
+            .map_err(|e| map_commit_error(e, &self.domain))?;
+        Ok(())
     }
 
-    pub async fn check_sequence_integrity(&mut self) -> Result<()> {
+    pub async fn check_sequence_integrity(&self) -> Result<()> {
         sqlx::query("SELECT ls_check_sequence_integrity($1)")
             .bind(&self.domain)
             .execute(&self.pool)
@@ -202,6 +261,7 @@ impl Repo {
             .map(|_| ())
             .map_err(Into::into)
     }
+
 
     pub async fn select_latest_sequence(&self) -> Result<i64> {
         select_latest_sequence(&self.pool, &self.domain)
@@ -361,9 +421,62 @@ impl<T: DeserializeOwned, U: DeserializeOwned> From<PgNotification> for QueryEve
     }
 }
 
-pub async fn migrate(pool: &PgPool) {
+pub async fn migrate(pool: &PgPool) -> Result<()> {
     EMBEDDED_MIGRATE
         .run(pool)
         .await
-        .expect("migration should succeed");
+        .map_err(|e| Error::MigrationFailed(e.to_string()))?;
+    Ok(())
+}
+
+fn validate_domain(domain: &str) -> Result<()> {
+    // allow: start [a-z], then [a-z0-9_], length <= 30
+    let bytes = domain.as_bytes();
+    if bytes.is_empty() || bytes.len() > 30 {
+        return Err(Error::InvalidDomain(domain.to_string()));
+    }
+    let first = bytes[0];
+    if !(b'a'..=b'z').contains(&first) {
+        return Err(Error::InvalidDomain(domain.to_string()));
+    }
+    if !bytes[1..]
+        .iter()
+        .all(|c| (b'a'..=b'z').contains(c) || (b'0'..=b'9').contains(c) || *c == b'_')
+    {
+        return Err(Error::InvalidDomain(domain.to_string()));
+    }
+    Ok(())
+}
+
+fn map_commit_error(e: sqlx::Error, domain: &str) -> Error {
+    if let sqlx::Error::Database(db_err) = &e {
+        let code = db_err.code().as_deref().unwrap_or("");
+        let msg = db_err.message();
+        let constraint = db_err.constraint().unwrap_or("");
+
+        // Unique violation
+        if code == "23505" {
+            if constraint.contains("_id") {
+                return Error::DuplicateEventId;
+            }
+            if constraint.contains("optimistic_concurrency") {
+                return Error::Concurrency;
+            }
+        }
+
+        // RAISE EXCEPTION from plpgsql
+        if code == "P0001" {
+            if msg.contains("optimistic concurrency exception") {
+                return Error::Concurrency;
+            }
+            if msg.contains("event id reused") {
+                return Error::DuplicateEventId;
+            }
+            if msg.contains("event length or event_id length invalid") {
+                return Error::InvalidCommit;
+            }
+        }
+    }
+    // Fallback to raw sqlx error
+    Error::Sqlx(e)
 }

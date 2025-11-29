@@ -60,7 +60,7 @@ impl<T: Aggregate> AggregateRoot<T> {
         std::mem::take(&mut self.changes)
     }
 
-    pub fn changes(&mut self) -> &[T::Event] {
+    pub fn changes(&self) -> &[T::Event] {
         &self.changes
     }
 

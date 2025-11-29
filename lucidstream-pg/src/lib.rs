@@ -131,8 +131,6 @@ impl Repo {
 
         let events = aggregate.take_changes();
         let expected_version: i64 = aggregate.version().try_into()?;
-        let aggregate = aggregate.apply(&events);
-        let updated_version: i64 = aggregate.version().try_into()?;
         let aggregate_id = aggregate.id();
 
         // prepare for serialization
@@ -140,7 +138,7 @@ impl Repo {
             .zip(events.iter())
             .map(|(i, data)| {
                 Json(CommitEnvelope {
-                    aggregate_id: &aggregate_id,
+                    aggregate_id,
                     version: expected_version + i,
                     data,
                     metadata: None,
@@ -151,12 +149,14 @@ impl Repo {
         sqlx::query(&self.commit_proc)
             .bind(aggregate_id)
             .bind(expected_version)
-            .bind(updated_version)
+            .bind(expected_version + events.len() as i64)
             .bind(Json(&aggregate))
             .bind(events_jsonb)
             .bind(event_ids)
             .execute(&self.pool)
             .await?;
+
+        aggregate.apply(&events);
         Ok(events)
     }
 
@@ -174,15 +174,13 @@ impl Repo {
 
         let events = aggregate.take_changes();
         let expected_version: i64 = aggregate.version().try_into()?;
-        let aggregate = aggregate.apply(&events);
-        let updated_version: i64 = aggregate.version().try_into()?;
         let aggregate_id = aggregate.id();
 
         let events_jsonb = (1i64..)
             .zip(events.iter().zip(event_ids.iter()))
             .map(|(i, (data, _id))| {
                 Json(CommitEnvelope {
-                    aggregate_id: &aggregate_id,
+                    aggregate_id,
                     version: expected_version + i,
                     data,
                     metadata: None::<&()>,
@@ -193,12 +191,13 @@ impl Repo {
         sqlx::query(&self.commit_proc)
             .bind(aggregate_id)
             .bind(expected_version)
-            .bind(updated_version)
+            .bind(expected_version + events.len() as i64)
             .bind(Json(&aggregate))
             .bind(events_jsonb)
             .bind(event_ids)
             .execute(&self.pool)
             .await?;
+        aggregate.apply(&events);
         Ok(events)
     }
 
@@ -225,7 +224,7 @@ impl Repo {
         T: Aggregate + Serialize,
         U: Serialize + Send + Sync + Unpin,
     {
-        assert!(events.len() > 0, "cannot have zero events to commit");
+        assert!(!events.is_empty(), "cannot have zero events to commit");
         let aggregate_id = applied_aggregate.id();
         let updated_version: i64 = applied_aggregate.version().try_into()?;
 
@@ -235,7 +234,7 @@ impl Repo {
             .map(|(i, manual)| {
                 event_ids.push(manual.id);
                 Json(CommitEnvelope {
-                    aggregate_id: &aggregate_id,
+                    aggregate_id,
                     version: expected_version + i,
                     data: manual.event,
                     metadata: manual.metadata,
@@ -244,7 +243,7 @@ impl Repo {
             .collect::<Vec<Json<CommitEnvelope<T::Event, U>>>>();
 
         sqlx::query(&self.commit_proc)
-            .bind(&aggregate_id)
+            .bind(aggregate_id)
             .bind(expected_version)
             .bind(updated_version)
             .bind(Json(&applied_aggregate))
@@ -437,12 +436,12 @@ fn validate_domain(domain: &str) -> Result<()> {
         return Err(Error::InvalidDomain(domain.to_string()));
     }
     let first = bytes[0];
-    if !(b'a'..=b'z').contains(&first) {
+    if !first.is_ascii_lowercase() {
         return Err(Error::InvalidDomain(domain.to_string()));
     }
     if !bytes[1..]
         .iter()
-        .all(|c| (b'a'..=b'z').contains(c) || (b'0'..=b'9').contains(c) || *c == b'_')
+        .all(|c: &u8| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_')
     {
         return Err(Error::InvalidDomain(domain.to_string()));
     }
@@ -455,7 +454,7 @@ fn map_commit_error(e: sqlx::Error) -> Error {
         let code = code_opt.as_deref().unwrap_or("");
         let msg = db_err.message();
         let constraint_opt = db_err.constraint();
-        let constraint = constraint_opt.as_deref().unwrap_or("");
+        let constraint = constraint_opt.unwrap_or("");
 
         // Unique violation
         if code == "23505" {

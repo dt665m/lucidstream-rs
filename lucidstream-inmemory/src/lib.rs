@@ -7,7 +7,7 @@ use std::fmt::Display;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -92,7 +92,7 @@ impl EventStoreT for MemEventStore {
                 .lock()
                 .unwrap()
                 .entry(id.to_owned())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(
                     serde_json::json!(Envelope {
                         id: id.to_owned(),

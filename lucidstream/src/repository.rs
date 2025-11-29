@@ -5,7 +5,7 @@ use crate::utils::retry_future;
 use std::fmt::{Debug, Display};
 
 use async_trait::async_trait;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -424,5 +424,5 @@ where
 /// "default" with 0 version is passed into the dry-run/manual-commit flow, the cache will be
 /// poisoned
 pub fn should_snapshot(version: u64, freq: u64) -> bool {
-    version > 0 && version % freq == 0
+    version > 0 && version.is_multiple_of(freq)
 }

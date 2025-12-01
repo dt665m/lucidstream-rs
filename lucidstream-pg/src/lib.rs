@@ -131,6 +131,8 @@ impl Repo {
 
         let events = aggregate.take_changes();
         let expected_version: i64 = aggregate.version().try_into()?;
+        let aggregate = aggregate.apply(&events);
+        let updated_version: i64 = aggregate.version().try_into()?;
         let aggregate_id = aggregate.id();
 
         // prepare for serialization
@@ -149,14 +151,12 @@ impl Repo {
         sqlx::query(&self.commit_proc)
             .bind(aggregate_id)
             .bind(expected_version)
-            .bind(expected_version + events.len() as i64)
+            .bind(updated_version)
             .bind(Json(&aggregate))
             .bind(events_jsonb)
             .bind(event_ids)
             .execute(&self.pool)
             .await?;
-
-        aggregate.apply(&events);
         Ok(events)
     }
 
@@ -174,6 +174,8 @@ impl Repo {
 
         let events = aggregate.take_changes();
         let expected_version: i64 = aggregate.version().try_into()?;
+        let aggregate = aggregate.apply(&events);
+        let updated_version: i64 = aggregate.version().try_into()?;
         let aggregate_id = aggregate.id();
 
         let events_jsonb = (1i64..)
@@ -191,13 +193,12 @@ impl Repo {
         sqlx::query(&self.commit_proc)
             .bind(aggregate_id)
             .bind(expected_version)
-            .bind(expected_version + events.len() as i64)
+            .bind(updated_version)
             .bind(Json(&aggregate))
             .bind(events_jsonb)
             .bind(event_ids)
             .execute(&self.pool)
             .await?;
-        aggregate.apply(&events);
         Ok(events)
     }
 

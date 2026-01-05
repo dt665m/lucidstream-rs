@@ -3,7 +3,7 @@ use crate::types::AggregateRoot;
 use std::fmt::{Debug, Display};
 
 use async_trait::async_trait;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 pub trait Aggregate: Default + Debug + Clone + Send + Sync + Sized {
     /// Command
@@ -25,7 +25,10 @@ pub trait Aggregate: Default + Debug + Clone + Send + Sync + Sized {
     fn kind() -> &'static str;
 
     /// Handle a command, which generates events
-    fn handle(&self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error>;
+    /// The 'self' is mutable here but it is not meant to have commands mutate real state, it's
+    /// only for temporary caches or other type of transactional data that might be necessary to
+    /// compute complicated batches of events
+    fn handle(&mut self, command: Self::Command) -> Result<Vec<Self::Event>, Self::Error>;
 
     /// Apply events   
     fn apply(self, event: &Self::Event) -> Self;

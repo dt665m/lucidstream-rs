@@ -3,12 +3,13 @@ name = "lucidstream"
 description = "Event Sourcing Traits and Types"
 authors.workspace = true
 version.workspace = true
-edition.workspace = true 
-repository.workspace = true 
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
 
 [dependencies]
 log = { workspace = true }
-async-trait = { workspace = true } 
-thiserror = { workspace = true } 
-futures = { workspace = true } 
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

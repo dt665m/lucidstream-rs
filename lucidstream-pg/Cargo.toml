@@ -4,17 +4,20 @@ description = "Lucidstream eventstore implementation for postgres"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 repository.workspace = true
+license.workspace = true
 
 [dependencies]
-lucidstream = { path = "../lucidstream" }
+lucidstream = { version = "2.0.0", path = "../lucidstream" }
 
 log = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 
-sqlx = { version = "0.8", default-features = false, features = [
-  "runtime-tokio-rustls",
+sqlx = { version = "0.9", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls-ring-webpki",
   "macros",
   "postgres",
   "uuid",
@@ -25,4 +28,7 @@ sqlx = { version = "0.8", default-features = false, features = [
   "migrate",
 ] }
 uuid = { version = "1", features = ["serde", "v1", "v4", "v5", "v7"] }
-serde_json = { version = "1" }
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

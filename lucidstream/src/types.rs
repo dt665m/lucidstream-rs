@@ -133,7 +133,9 @@ mod test {
 
     impl std::fmt::Display for Error {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "test error")
+            match self {
+                Self::Msg(message) => f.write_str(message),
+            }
         }
     }
 

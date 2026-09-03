@@ -1,3 +1,9 @@
+pub mod chaser;
+pub use chaser::{
+    DEFAULT_CHASE_BATCH_SIZE, DEFAULT_RECONCILIATION_INTERVAL, PgEventChaser, PgEventChaserConfig,
+    capture_safe_head, verify_chaser_sequence,
+};
+
 use lucidstream::traits::Aggregate;
 use lucidstream::types::AggregateRoot;
 
@@ -7,7 +13,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{
     Executor, FromRow, Row,
     migrate::Migrator,
-    postgres::{PgNotification, PgPool, PgRow, Postgres},
+    postgres::{PgPool, PgRow, Postgres},
     types::Json,
 };
 use uuid::Uuid;
@@ -51,6 +57,21 @@ pub enum Error {
 
     #[error("Migration failed: `{0}`")]
     MigrationFailed(String),
+
+    #[error("Invalid event chaser batch size: `{0}`")]
+    InvalidChaserBatchSize(i64),
+
+    #[error("The event chaser reconciliation interval must be greater than zero")]
+    InvalidReconciliationInterval,
+
+    #[error("No owned sequence exists for event table `{0}`")]
+    MissingEventSequence(String),
+
+    #[error("Sequence `{sequence}` uses CACHE {cache_size}; safe chasing requires CACHE 1")]
+    UnsafeSequenceCache { sequence: String, cache_size: i64 },
+
+    #[error(transparent)]
+    EventSorter(#[from] lucidstream::chaser::EventSorterError),
 }
 
 impl From<sqlx::Error> for Error {
@@ -74,10 +95,10 @@ impl Repo {
     pub async fn new<S: Into<String>>(pool: PgPool, domain: S) -> Result<Self> {
         let domain: String = domain.into();
         validate_domain(&domain)?;
-        let commit_proc = format!("CALL {}_commit($1, $2, $3, $4, $5, $6)", &domain);
+        let commit_proc = format!("CALL {}_commit($1, $2, $3, $4, $5, $6)", domain);
         let aggregate_query = format!(
             "SELECT current_state FROM {}_aggregates WHERE aggregate_id = $1",
-            &domain
+            domain
         );
 
         let repo = Self {
@@ -87,10 +108,9 @@ impl Repo {
             aggregate_query,
         };
 
-        //#NOTE integrity check is vital.  If we crash from accidentally screwing up the insert of
-        //events by repeating used UUID's or if there was a postgres server crash, sequences will
-        //be off.  Its better to be safe and just fix it everytime.
-        repo.check_sequence_integrity().await?;
+        // Gaps are valid. Rewinding this sequence to MAX(sequence) could reuse a position
+        // already certified by a chaser, so startup only verifies the safe-chasing invariant.
+        chaser::verify_chaser_sequence(&repo.pool, &repo.domain).await?;
         Ok(repo)
     }
 
@@ -109,7 +129,7 @@ impl Repo {
     where
         T::Event: Unpin,
     {
-        sqlx::query(&self.aggregate_query)
+        sqlx::query(sqlx::AssertSqlSafe(self.aggregate_query.as_str()))
             .bind(id)
             .try_map(|row: PgRow| Ok(row.try_get::<Json<AggregateRoot<T>>, _>(0)?.0))
             .fetch_optional(&self.pool)
@@ -129,11 +149,12 @@ impl Repo {
             event_ids.push(Uuid::new_v4())
         }
 
-        let events = aggregate.take_changes();
-        let expected_version: i64 = aggregate.version().try_into()?;
-        let aggregate = aggregate.apply(&events);
-        let updated_version: i64 = aggregate.version().try_into()?;
-        let aggregate_id = aggregate.id();
+        let mut committed_aggregate = aggregate.clone();
+        let events = committed_aggregate.take_changes();
+        let expected_version: i64 = committed_aggregate.version().try_into()?;
+        committed_aggregate.apply(&events);
+        let updated_version: i64 = committed_aggregate.version().try_into()?;
+        let aggregate_id = committed_aggregate.id();
 
         // prepare for serialization
         let events_jsonb = (1i64..)
@@ -148,15 +169,16 @@ impl Repo {
             })
             .collect::<Vec<Json<CommitEnvelope<T::Event>>>>();
 
-        sqlx::query(&self.commit_proc)
+        sqlx::query(sqlx::AssertSqlSafe(self.commit_proc.as_str()))
             .bind(aggregate_id)
             .bind(expected_version)
             .bind(updated_version)
-            .bind(Json(&aggregate))
+            .bind(Json(&committed_aggregate))
             .bind(events_jsonb)
             .bind(event_ids)
             .execute(&self.pool)
             .await?;
+        *aggregate = committed_aggregate;
         Ok(events)
     }
 
@@ -172,11 +194,12 @@ impl Repo {
             return Err(Error::InvalidCommit);
         }
 
-        let events = aggregate.take_changes();
-        let expected_version: i64 = aggregate.version().try_into()?;
-        let aggregate = aggregate.apply(&events);
-        let updated_version: i64 = aggregate.version().try_into()?;
-        let aggregate_id = aggregate.id();
+        let mut committed_aggregate = aggregate.clone();
+        let events = committed_aggregate.take_changes();
+        let expected_version: i64 = committed_aggregate.version().try_into()?;
+        committed_aggregate.apply(&events);
+        let updated_version: i64 = committed_aggregate.version().try_into()?;
+        let aggregate_id = committed_aggregate.id();
 
         let events_jsonb = (1i64..)
             .zip(events.iter().zip(event_ids.iter()))
@@ -190,30 +213,36 @@ impl Repo {
             })
             .collect::<Vec<Json<CommitEnvelope<T::Event>>>>();
 
-        sqlx::query(&self.commit_proc)
+        sqlx::query(sqlx::AssertSqlSafe(self.commit_proc.as_str()))
             .bind(aggregate_id)
             .bind(expected_version)
             .bind(updated_version)
-            .bind(Json(&aggregate))
+            .bind(Json(&committed_aggregate))
             .bind(events_jsonb)
             .bind(event_ids)
             .execute(&self.pool)
             .await?;
+        *aggregate = committed_aggregate;
         Ok(events)
     }
 
     /// The Aggregate is expected to be pre-handled by the caller, which is why the parameter is
     /// 'applied_aggregate'.
     /// example:
-    /// ```
+    /// ```ignore
     /// let expected_version = aggregate.version();
-    /// let events = aggregate.handle(command).unwrap();
-    /// aggregate.apply(events);
+    /// aggregate.handle(command).unwrap();
+    /// let events = aggregate.take_changes();
+    /// aggregate.apply(&events);
     /// let meta = 42;
     /// let m_evt = events.iter()
-    ///     .map(|e| ManualEvent{ event, id: Uuid::new_v4(), metadata: &meta })
-    ///     .collect();
-    /// repo.manual_commit(expected_version, aggregate, m_evt).await.unwrap();
+    ///     .map(|event| ManualEvent {
+    ///         event,
+    ///         id: Uuid::new_v4(),
+    ///         metadata: Some(&meta),
+    ///     })
+    ///     .collect::<Vec<_>>();
+    /// repo.manual_commit(expected_version, &aggregate, &m_evt).await.unwrap();
     /// ```
     pub async fn manual_commit<'a, T, U>(
         &self,
@@ -243,7 +272,7 @@ impl Repo {
             })
             .collect::<Vec<Json<CommitEnvelope<T::Event, U>>>>();
 
-        sqlx::query(&self.commit_proc)
+        sqlx::query(sqlx::AssertSqlSafe(self.commit_proc.as_str()))
             .bind(aggregate_id)
             .bind(expected_version)
             .bind(updated_version)
@@ -253,21 +282,6 @@ impl Repo {
             .execute(&self.pool)
             .await?;
         Ok(())
-    }
-
-    pub async fn check_sequence_integrity(&self) -> Result<()> {
-        sqlx::query("SELECT ls_check_sequence_integrity($1)")
-            .bind(&self.domain)
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
-            .map_err(Into::into)
-    }
-
-    pub async fn select_latest_sequence(&self) -> Result<i64> {
-        select_latest_sequence(&self.pool, &self.domain)
-            .await
-            .map_err(Into::into)
     }
 
     pub async fn select_events_from<T: Aggregate + Serialize, U>(
@@ -328,24 +342,6 @@ where
     }
 }
 
-pub async fn select_latest_sequence<'e, T>(conn: T, domain: &str) -> sqlx::Result<i64>
-where
-    T: Executor<'e, Database = Postgres>,
-{
-    sqlx::query(&format!(
-        r#"
-        SELECT sequence
-        FROM {}_events
-        ORDER BY sequence DESC LIMIT 1
-    "#,
-        domain
-    ))
-    .try_map(|row: PgRow| row.try_get(0))
-    .fetch_optional(conn)
-    .await
-    .map(|v| v.unwrap_or_default())
-}
-
 pub async fn select_events_from<'e, C, T, U>(
     conn: C,
     domain: &str,
@@ -358,7 +354,8 @@ where
     T: DeserializeOwned + Send + Unpin,
     U: DeserializeOwned + Send + Unpin,
 {
-    sqlx::query_as(&format!(
+    validate_domain(domain).map_err(|error| sqlx::Error::InvalidArgument(error.to_string()))?;
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         r#"
         SELECT sequence, aggregate_id, id, version, data
         FROM {}_events
@@ -367,7 +364,7 @@ where
         LIMIT $3
     "#,
         domain
-    ))
+    )))
     .bind(start_seq)
     .bind(end_seq)
     .bind(limit)
@@ -376,50 +373,13 @@ where
 }
 
 pub async fn init_domain(pool: &PgPool, domain: &str) -> Result<()> {
+    validate_domain(domain)?;
     sqlx::query("SELECT ls_new_commit_proc($1)")
         .bind(domain)
         .execute(pool)
         .await
         .map(|_| ())
         .map_err(Into::into)
-}
-
-#[derive(Deserialize, Debug)]
-pub struct LucidNotification<T> {
-    pub origin: String,
-    pub op: String,
-    pub record: T,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct HackEventContainer<T, U> {
-    pub sequence: i64,
-    pub aggregate_id: String,
-    pub id: Uuid,
-    pub version: i64,
-    pub data: InnerData<T, U>,
-}
-
-impl<T, U> From<HackEventContainer<T, U>> for QueryEvent<T, U> {
-    fn from(hack: HackEventContainer<T, U>) -> Self {
-        Self {
-            sequence: hack.sequence,
-            aggregate_id: hack.aggregate_id,
-            id: hack.id,
-            version: hack.version,
-            data: hack.data.data,
-            metadata: hack.data.metadata,
-        }
-    }
-}
-
-impl<T: DeserializeOwned, U: DeserializeOwned> From<PgNotification> for QueryEvent<T, U> {
-    fn from(value: PgNotification) -> Self {
-        serde_json::from_str::<LucidNotification<HackEventContainer<T, U>>>(value.payload())
-            .expect("PgNotification parse can't failed")
-            .record
-            .into()
-    }
 }
 
 pub async fn migrate(pool: &PgPool) -> Result<()> {
@@ -482,4 +442,143 @@ fn map_commit_error(e: sqlx::Error) -> Error {
     }
     // Fallback to raw sqlx error
     Error::Sqlx(e)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::{self, Display};
+
+    use serde::{Deserialize, Serialize};
+    use sqlx::postgres::PgPoolOptions;
+
+    use super::*;
+
+    #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+    struct TestAggregate {
+        handled: usize,
+        committed: usize,
+    }
+
+    #[derive(Clone, Debug, Deserialize, Serialize)]
+    enum TestCommand {
+        Increment,
+    }
+
+    impl Display for TestCommand {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("increment")
+        }
+    }
+
+    #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+    enum TestEvent {
+        Incremented,
+    }
+
+    impl Display for TestEvent {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("incremented")
+        }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("test aggregate error")]
+    struct TestError;
+
+    impl Aggregate for TestAggregate {
+        type Command = TestCommand;
+        type Error = TestError;
+        type Event = TestEvent;
+
+        fn kind() -> &'static str {
+            "test"
+        }
+
+        fn handle(
+            &mut self,
+            _: Self::Command,
+        ) -> std::result::Result<Vec<Self::Event>, Self::Error> {
+            self.handled += 1;
+            Ok(vec![TestEvent::Incremented])
+        }
+
+        fn apply(mut self, _: &Self::Event) -> Self {
+            self.committed += 1;
+            self
+        }
+    }
+
+    async fn closed_repo() -> Repo {
+        let pool = PgPoolOptions::new()
+            .connect_lazy("postgres://postgres@localhost/lucidstream")
+            .expect("test database URL is valid");
+        pool.close().await;
+
+        Repo {
+            pool,
+            domain: "test".to_owned(),
+            commit_proc: "CALL test_commit($1, $2, $3, $4, $5, $6)".to_owned(),
+            aggregate_query: "SELECT 1".to_owned(),
+        }
+    }
+
+    fn aggregate_with_pending_change() -> AggregateRoot<TestAggregate> {
+        let mut aggregate = AggregateRoot::new("aggregate-id");
+        aggregate
+            .handle(TestCommand::Increment)
+            .expect("test command succeeds");
+        aggregate
+    }
+
+    fn assert_pending_change_is_preserved(aggregate: &AggregateRoot<TestAggregate>) {
+        assert_eq!(aggregate.version(), 0);
+        assert_eq!(
+            aggregate.state(),
+            &TestAggregate {
+                handled: 1,
+                committed: 0,
+            }
+        );
+        assert_eq!(aggregate.changes(), &[TestEvent::Incremented]);
+    }
+
+    #[tokio::test]
+    async fn commit_with_state_preserves_aggregate_when_database_commit_fails() {
+        let repo = closed_repo().await;
+        let mut aggregate = aggregate_with_pending_change();
+
+        let error = repo
+            .commit_with_state(&mut aggregate)
+            .await
+            .expect_err("a closed pool must reject the commit");
+
+        assert!(matches!(error, Error::Sqlx(sqlx::Error::PoolClosed)));
+        assert_pending_change_is_preserved(&aggregate);
+    }
+
+    #[tokio::test]
+    async fn commit_with_state_with_ids_preserves_aggregate_when_database_commit_fails() {
+        let repo = closed_repo().await;
+        let mut aggregate = aggregate_with_pending_change();
+
+        let error = repo
+            .commit_with_state_with_ids(&mut aggregate, &[Uuid::new_v4()])
+            .await
+            .expect_err("a closed pool must reject the commit");
+
+        assert!(matches!(error, Error::Sqlx(sqlx::Error::PoolClosed)));
+        assert_pending_change_is_preserved(&aggregate);
+    }
+
+    #[tokio::test]
+    async fn dynamic_query_helpers_reject_unsafe_domain_names() {
+        let repo = closed_repo().await;
+
+        let error =
+            select_events_from::<_, TestEvent, ()>(&repo.pool, "test; DROP TABLE events", 0, 1, 1)
+                .await
+                .expect_err("unsafe domain names must be rejected before querying");
+
+        assert!(matches!(error, sqlx::Error::InvalidArgument(_)));
+    }
 }

@@ -3,6 +3,7 @@ name = "integration-tests"
 authors.workspace = true
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 repository.workspace = true
 publish = false
 
@@ -20,8 +21,9 @@ thiserror = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
-sqlx = { version = "0.8", default-features = false, features = [
-  "runtime-tokio-rustls",
+sqlx = { version = "0.9", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls-ring-webpki",
   "macros",
   "postgres",
   "uuid",

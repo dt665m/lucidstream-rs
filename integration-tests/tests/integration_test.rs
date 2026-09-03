@@ -10,12 +10,13 @@ fn init() {
     let _ = pretty_env_logger::try_init();
 }
 
-async fn connect_pg_repo() -> PgRepo {
-    let pool =
-        PgPool::connect("postgres://postgres:123456@localhost:5432/postgres?sslmode=disable")
-            .await
-            .expect("pool should connect. qed");
-    let domain = "it_account";
+async fn connect_pg_repo(domain: &str) -> PgRepo {
+    let database_url = std::env::var("LUCIDSTREAM_DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://postgres:123456@localhost:5432/postgres?sslmode=disable".to_owned()
+    });
+    let pool = PgPool::connect(&database_url)
+        .await
+        .expect("pool should connect. qed");
     lucidstream_pg::EMBEDDED_MIGRATE
         .run(&pool)
         .await
@@ -34,7 +35,11 @@ async fn test_all_pg() {
 
     init();
     log::info!("TEST_ALL_PG");
-    let repo = connect_pg_repo().await;
+    let repo = connect_pg_repo("it_account").await;
+    sqlx::query("TRUNCATE it_account_events, it_account_aggregates RESTART IDENTITY")
+        .execute(repo.pool())
+        .await
+        .unwrap();
     let id = Uuid::new_v4();
 
     // should create a new one
@@ -151,7 +156,7 @@ async fn benchmark() {
     log::debug!("BENCHMARK");
 
     // Use the Postgres repo directly for benchmarking
-    let repo = std::sync::Arc::new(connect_pg_repo().await);
+    let repo = std::sync::Arc::new(connect_pg_repo("it_benchmark_account").await);
 
     // Ensure the aggregate exists with an initial event
     let id = "654321".to_string();

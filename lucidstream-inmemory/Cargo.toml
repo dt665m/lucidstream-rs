@@ -10,7 +10,7 @@ readme = "../README.md"
 description = "Lucidstream eventstore implementation (in memory)"
 
 [dependencies]
-lucidstream = { version = "2.1.0", path = "../lucidstream" }
+lucidstream = { version = "3.0.0", path = "../lucidstream" }
 
 async-trait = { workspace = true } 
 thiserror = { workspace = true } 

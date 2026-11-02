@@ -10,7 +10,7 @@ license.workspace = true
 readme = "../README.md"
 
 [dependencies]
-lucidstream = { version = "2.1.0", path = "../lucidstream" }
+lucidstream = { version = "3.0.0", path = "../lucidstream" }
 
 log = { workspace = true }
 thiserror = { workspace = true }

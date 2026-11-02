@@ -7,7 +7,7 @@ pub use chaser::{
 use lucidstream::traits::Aggregate;
 use lucidstream::types::AggregateRoot;
 
-use std::{fmt::Debug, marker::Unpin, num::TryFromIntError};
+use std::{borrow::Cow, fmt::Debug, marker::Unpin, num::TryFromIntError};
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{
@@ -18,7 +18,11 @@ use sqlx::{
 };
 use uuid::Uuid;
 
-pub static EMBEDDED_MIGRATE: Migrator = sqlx::migrate!();
+static EMBEDDED_MIGRATE: Migrator = sqlx::migrate!();
+
+/// Lucid Stream records its schema history apart from the application's own SQLx
+/// history, so both migrators can run against one database independently.
+pub const MIGRATIONS_TABLE: &str = "_lucidstream_migrations";
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -383,10 +387,14 @@ pub async fn init_domain(pool: &PgPool, domain: &str) -> Result<()> {
 }
 
 pub async fn migrate(pool: &PgPool) -> Result<()> {
-    EMBEDDED_MIGRATE
-        .run(pool)
-        .await
-        .map_err(|e| Error::MigrationFailed(e.to_string()))?;
+    Migrator {
+        migrations: EMBEDDED_MIGRATE.migrations.clone(),
+        table_name: Cow::Borrowed(MIGRATIONS_TABLE),
+        ..Migrator::DEFAULT
+    }
+    .run(pool)
+    .await
+    .map_err(|e| Error::MigrationFailed(e.to_string()))?;
     Ok(())
 }
 
@@ -419,11 +427,12 @@ fn map_commit_error(e: sqlx::Error) -> Error {
 
         // Unique violation
         if code == "23505" {
-            if constraint.contains("_id") {
-                return Error::DuplicateEventId;
-            }
+            // `<domain>_events_optimistic_concurrency_idx` also contains "_id".
             if constraint.contains("optimistic_concurrency") {
                 return Error::Concurrency;
+            }
+            if constraint.ends_with("_events_id") {
+                return Error::DuplicateEventId;
             }
         }
 

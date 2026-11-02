@@ -17,8 +17,7 @@ async fn connect_pg_repo(domain: &str) -> PgRepo {
     let pool = PgPool::connect(&database_url)
         .await
         .expect("pool should connect. qed");
-    lucidstream_pg::EMBEDDED_MIGRATE
-        .run(&pool)
+    lucidstream_pg::migrate(&pool)
         .await
         .expect("migration should succeed");
     lucidstream_pg::init_domain(&pool, domain)
@@ -148,6 +147,59 @@ async fn test_all_pg() {
         }
     });
     log::info!("====== complete");
+}
+
+#[tokio::test]
+async fn racing_commit_reports_concurrency_without_overwriting_the_winner() {
+    init();
+    let repo = connect_pg_repo("it_race").await;
+    let pool = repo.pool().clone();
+    let id = Uuid::new_v4().simple().to_string();
+    let mut ar = repo.load::<Account>(&id).await.unwrap();
+    ar.handle(Command::Credit { value: 5 }).unwrap();
+    repo.commit_with_state(&mut ar).await.unwrap();
+    let version = i64::try_from(ar.version()).unwrap();
+
+    // The winner's commit from the same version is in flight when the loser commits.
+    let mut winner = pool.begin().await.unwrap();
+    sqlx::query("CALL it_race_commit($1, $2, $3, $4, $5, $6)")
+        .bind(&id)
+        .bind(version)
+        .bind(version + 1)
+        .bind(serde_json::json!({ "winner": true }))
+        .bind(vec![serde_json::json!({ "kind": "Credited", "value": 1 })])
+        .bind(vec![Uuid::new_v4()])
+        .execute(&mut *winner)
+        .await
+        .unwrap();
+    ar.handle(Command::Credit { value: 7 }).unwrap();
+    let release = async {
+        let mut waited = false;
+        for _ in 0..250 {
+            waited = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock')",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            if waited {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        winner.commit().await.unwrap();
+        waited
+    };
+    let (loser, waited) = tokio::join!(repo.commit_with_state(&mut ar), release);
+    assert!(waited, "the loser must wait for the in-flight winner");
+    assert!(matches!(loser, Err(lucidstream_pg::Error::Concurrency)));
+    let state: serde_json::Value =
+        sqlx::query_scalar("SELECT current_state FROM it_race_aggregates WHERE aggregate_id = $1")
+            .bind(&id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(state, serde_json::json!({ "winner": true }));
 }
 
 #[tokio::test]

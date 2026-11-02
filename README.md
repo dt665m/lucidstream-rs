@@ -7,8 +7,8 @@ rollbacks, failed inserts, backend crashes, or database overload.
 
 ```toml
 [dependencies]
-lucidstream = "2.1"
-lucidstream-pg = "2.1"
+lucidstream = "3.0"
+lucidstream-pg = "3.0"
 ```
 
 ## PostgreSQL setup
@@ -22,6 +22,13 @@ migrate(&pool).await?;
 init_domain(&pool, "wallet").await?;
 let repo = Repo::new(pool.clone(), "wallet").await?;
 ```
+
+`migrate` records Lucid Stream's schema history in its own `_lucidstream_migrations` table,
+so an application's SQLx migrator and history stay independent of Lucid Stream releases.
+Lucid Stream owns its functions and each domain's `<domain>_aggregates`, `<domain>_events`
+and `<domain>_commit` objects; `init_domain` is idempotent and upgrades the commit procedure.
+Commits compare-and-swap the aggregate version without an explicit row lock: a concurrent
+commit from the same version returns `Error::Concurrency` and never overwrites the winner.
 
 `Repo::new` verifies that the event table owns a sequence with `CACHE 1`. PostgreSQL uses
 `CACHE 1` for `BIGSERIAL` by default. Lucid Stream never rewinds, repairs, or renumbers that
